@@ -1,10 +1,11 @@
+use crate::filesystem::File;
+use crate::memory::{MemoryMapper, UserMemoryMapper};
 use core::mem::align_of;
-
 use x86_64::{
     align_up,
     structures::paging::{
-        mapper::{Mapper, MappedFrame, TranslateResult},
-        Translate, Page, PageSize, PageTableFlags as Flags, PhysFrame, Size4KiB,
+        mapper::{MappedFrame, Mapper, TranslateResult},
+        Page, PageSize, PageTableFlags as Flags, PhysFrame, Size4KiB, Translate,
     },
     PhysAddr, VirtAddr,
 };
@@ -14,8 +15,6 @@ use xmas_elf::{
     sections::Rela,
     ElfFile,
 };
-use crate::memory::{MemoryMapper, UserMemoryMapper};
-use crate::filesystem::File;
 
 pub use bootloader::boot_info::TlsTemplate;
 
@@ -34,16 +33,24 @@ struct Inner<'a> {
 }
 
 impl<'a> Loader<'a> {
-    fn new(mapper: &'a mut UserMemoryMapper, phys_addr: PhysAddr, len: usize) -> Result<Self, &'static str> {
+    fn new(
+        mapper: &'a mut UserMemoryMapper,
+        phys_addr: PhysAddr,
+        len: usize,
+    ) -> Result<Self, &'static str> {
         let bytes_addr = mapper.untranslate(phys_addr);
-        Page::<Size4KiB>::from_start_address(bytes_addr).map_err(|_| "ELF file not sufficiently aligned")?;
+        Page::<Size4KiB>::from_start_address(bytes_addr)
+            .map_err(|_| "ELF file not sufficiently aligned")?;
         let bytes = unsafe { core::slice::from_raw_parts(bytes_addr.as_ptr(), len) };
 
         let elf_file = ElfFile::new(bytes)?;
         for program_header in elf_file.program_iter() {
             program::sanity_check(program_header, &elf_file)?;
         }
-        assert_eq!(elf_file.header.pt2.type_().as_type(), header::Type::Executable);
+        assert_eq!(
+            elf_file.header.pt2.type_().as_type(),
+            header::Type::Executable
+        );
         header::sanity_check(&elf_file)?;
 
         Ok(Loader {
@@ -84,7 +91,8 @@ impl<'a> Loader<'a> {
         // Apply relocations in virtual memory.
         for program_header in self.elf_file.program_iter() {
             if let Type::Dynamic = program_header.get_type()? {
-                self.inner.handle_dynamic_segment(program_header, &self.elf_file)?
+                self.inner
+                    .handle_dynamic_segment(program_header, &self.elf_file)?
             }
         }
 
@@ -108,7 +116,8 @@ impl<'a> Inner<'a> {
     fn handle_load_segment(&mut self, segment: ProgramHeader) -> Result<(), &'static str> {
         let phys_start_addr = self.phys_addr + segment.offset();
         let start_frame: PhysFrame = PhysFrame::containing_address(phys_start_addr);
-        let end_frame: PhysFrame = PhysFrame::containing_address(phys_start_addr + segment.file_size() - 1u64);
+        let end_frame: PhysFrame =
+            PhysFrame::containing_address(phys_start_addr + segment.file_size() - 1u64);
 
         let virt_start_addr = VirtAddr::new(segment.virtual_addr()) + self.virtual_address_offset;
         let start_page: Page = Page::containing_address(virt_start_addr);
@@ -126,7 +135,9 @@ impl<'a> Inner<'a> {
             let offset = frame - start_frame;
             let page = start_page + offset;
             unsafe {
-                self.mapper.map_page(page, frame, segment_flags).map_err(|_err| "map_to failed")?;
+                self.mapper
+                    .map_page(page, frame, segment_flags)
+                    .map_err(|_err| "map_to failed")?;
             }
         }
 
@@ -191,7 +202,10 @@ impl<'a> Inner<'a> {
 
             let last_page = Page::containing_address(virt_start_addr + file_size - 1u64);
             let new_frame = unsafe { self.make_mut(last_page) };
-            let new_bytes_ptr = self.mapper.untranslate(new_frame.start_address()).as_mut_ptr::<u8>();
+            let new_bytes_ptr = self
+                .mapper
+                .untranslate(new_frame.start_address())
+                .as_mut_ptr::<u8>();
             unsafe {
                 core::ptr::write_bytes(
                     new_bytes_ptr.add(data_bytes_before_zero as usize),
@@ -210,12 +224,17 @@ impl<'a> Inner<'a> {
             let frame = self.mapper.allocate_frame().unwrap();
 
             // zero frame
-            let frame_ptr = self.mapper.untranslate(frame.start_address()).as_mut_ptr::<PageArray>();
+            let frame_ptr = self
+                .mapper
+                .untranslate(frame.start_address())
+                .as_mut_ptr::<PageArray>();
             unsafe { frame_ptr.write(ZERO_ARRAY) };
 
             // map frame
             unsafe {
-                self.mapper.map_page(page, frame, segment_flags).map_err(|_err| "failed to map new frame for bss memory")?
+                self.mapper
+                    .map_page(page, frame, segment_flags)
+                    .map_err(|_err| "failed to map new frame for bss memory")?
             }
         }
 
@@ -262,8 +281,14 @@ impl<'a> Inner<'a> {
 
         // Allocate a new frame and copy the memory.
         let new_frame = self.mapper.allocate_frame().unwrap();
-        let frame_ptr = self.mapper.untranslate(frame.start_address()).as_ptr::<u8>();
-        let new_frame_ptr = self.mapper.untranslate(new_frame.start_address()).as_mut_ptr::<u8>();
+        let frame_ptr = self
+            .mapper
+            .untranslate(frame.start_address())
+            .as_ptr::<u8>();
+        let new_frame_ptr = self
+            .mapper
+            .untranslate(new_frame.start_address())
+            .as_mut_ptr::<u8>();
         unsafe {
             core::ptr::copy_nonoverlapping(frame_ptr, new_frame_ptr, Size4KiB::SIZE as usize);
         }
@@ -304,7 +329,10 @@ impl<'a> Inner<'a> {
                     if flags.contains(COPIED) {
                         // Remove the flag.
                         unsafe {
-                            page_table.update_flags(page, flags & !COPIED).unwrap().ignore();
+                            page_table
+                                .update_flags(page, flags & !COPIED)
+                                .unwrap()
+                                .ignore();
                         }
                     }
                 }
@@ -466,7 +494,10 @@ impl<'a> Inner<'a> {
             if flags.contains(Flags::WRITABLE) {
                 // Remove the WRITABLE flag.
                 unsafe {
-                    page_table.update_flags(page, flags & !Flags::WRITABLE).unwrap().ignore();
+                    page_table
+                        .update_flags(page, flags & !Flags::WRITABLE)
+                        .unwrap()
+                        .ignore();
                 }
             }
         }
@@ -488,14 +519,23 @@ fn check_is_in_load(elf_file: &ElfFile, virt_offset: u64) -> Result<(), &'static
     Err("offset is not in load segment")
 }
 
-pub fn load_from_disk(mapper: &mut UserMemoryMapper, file: File) -> Result<(VirtAddr, Option<TlsTemplate>), &'static str> {
+pub fn load_from_disk(
+    mapper: &mut UserMemoryMapper,
+    file: File,
+) -> Result<(VirtAddr, Option<TlsTemplate>), &'static str> {
     // Read the file into unmapped physical memory, since the Loader will map everything anyway.
     let mut phys_frame = mapper.allocate_frame().unwrap();
     let start_addr = phys_frame.start_address();
     let mut phys_addr = start_addr;
     let mut file_size = 0;
     for (sector, num_bytes) in file.read_per_sector() {
-        unsafe { core::ptr::copy(sector.as_ptr(), mapper.untranslate(phys_addr).as_mut_ptr(), num_bytes); }
+        unsafe {
+            core::ptr::copy(
+                sector.as_ptr(),
+                mapper.untranslate(phys_addr).as_mut_ptr(),
+                num_bytes,
+            );
+        }
         file_size += num_bytes;
         phys_addr += num_bytes;
         if phys_addr >= phys_frame.start_address() + phys_frame.size() {

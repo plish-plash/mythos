@@ -2,13 +2,12 @@
 
 /// Implementation Courtesy of MOROS.
 /// Currently Only Supports ATA-PIO, with 24-bit LBA Addressing.
-
 extern crate alloc;
 
-use core::hint::spin_loop;
 use alloc::string::String;
 use alloc::vec::Vec;
 use bit_field::BitField;
+use core::hint::spin_loop;
 use spin::Mutex;
 use x86_64::instructions::port::{Port, PortReadOnly, PortWriteOnly};
 
@@ -28,6 +27,7 @@ enum Command {
 }
 
 #[allow(dead_code)]
+#[allow(clippy::upper_case_acronyms)]
 #[repr(usize)]
 enum Status {
     ERR = 0,
@@ -63,9 +63,11 @@ pub struct Bus {
 }
 
 impl Bus {
+    #[allow(clippy::identity_op)]
     pub fn new(id: u8, io_base: u16, ctrl_base: u16, irq: u8) -> Self {
         Self {
-            id, irq,
+            id,
+            irq,
 
             data_register: Port::new(io_base + 0),
             error_register: PortReadOnly::new(io_base + 1),
@@ -94,8 +96,11 @@ impl Bus {
     }
 
     fn wait(&mut self) {
-        for _ in 0..4 { // Wait about 4 x 100 ns
-            unsafe { self.alternate_status_register.read(); }
+        for _ in 0..4 {
+            // Wait about 4 x 100 ns
+            unsafe {
+                self.alternate_status_register.read();
+            }
         }
     }
 
@@ -129,7 +134,8 @@ impl Bus {
         self.wait();
         let start = 0;
         while self.is_busy() {
-            if 0 - start > 1 { // Hanged
+            if 0 - start > 1 {
+                // Hanged
                 return self.reset();
             }
 
@@ -161,7 +167,8 @@ impl Bus {
     fn setup(&mut self, drive: u8, block: u32) {
         let drive_id = 0xE0 | (drive << 4);
         unsafe {
-            self.drive_register.write(drive_id | ((block.get_bits(24..28) as u8) & 0x0F));
+            self.drive_register
+                .write(drive_id | ((block.get_bits(24..28) as u8) & 0x0F));
             self.sector_count_register.write(1);
             self.lba0_register.write(block.get_bits(0..8) as u8);
             self.lba1_register.write(block.get_bits(8..16) as u8);
@@ -206,8 +213,8 @@ impl Bus {
         }
 
         let mut res = [0; 256];
-        for i in 0..256 {
-            res[i] = self.read_data();
+        for it in res.iter_mut() {
+            *it = self.read_data();
         }
         Some(res)
     }
@@ -229,17 +236,12 @@ impl Bus {
 
     pub fn read(&mut self, drive: u8, block: u32, buf: &mut [u8]) {
         assert_eq!(buf.len(), 512);
-        //log!("Reading Block 0x{:8X}\n", block);
-        //log!("{:?}", self);
-
         self.setup(drive, block);
         self.write_command(Command::Read);
         self.busy_loop();
         for i in 0..256 {
             let data = self.read_data();
-
-            //log!("Read[{:08X}][{:02X}]: 0x{:04X}\n", block, i, data);
-            buf[i * 2 + 0] = data.get_bits(0..8) as u8;
+            buf[i * 2] = data.get_bits(0..8) as u8;
             buf[i * 2 + 1] = data.get_bits(8..16) as u8;
         }
     }
@@ -265,18 +267,14 @@ impl Bus {
         self.write_command(Command::Write);
         self.busy_loop();
         for i in 0..256 {
-            let mut data = 0 as u16;
+            let mut data = 0u16;
             data.set_bits(0..8, buf[i * 2] as u16);
             data.set_bits(8..16, buf[i * 2 + 1] as u16);
-
-            //log!("Data: 0x{:04X} | {}{}    \n", data, buf[i * 2] as char, buf[i * 2 + 1] as char);
-
             self.write_data(data);
         }
         self.busy_loop();
     }
 }
-
 
 static BUSES: Mutex<Vec<Bus>> = Mutex::new(Vec::new());
 
@@ -296,12 +294,20 @@ pub struct Drive {
 
 impl Drive {
     fn new(bus: u8, drive: u8, block_count: u32) -> Drive {
-        Drive { bus: bus as usize, drive, block_count: block_count as usize }
+        Drive {
+            bus: bus as usize,
+            drive,
+            block_count: block_count as usize,
+        }
     }
-    fn byte_index_to_lba(&self, mut address: usize, number_of_blocks: usize) -> Result<usize, AtaError> {
+    fn byte_index_to_lba(
+        &self,
+        mut address: usize,
+        number_of_blocks: usize,
+    ) -> Result<usize, AtaError> {
         const BLOCK_SIZE: usize = Drive::BLOCK_SIZE as usize;
         if address % BLOCK_SIZE != 0 {
-            return Err(AtaError::AddressNotAligned)
+            return Err(AtaError::AddressNotAligned);
         }
         address /= BLOCK_SIZE;
         if address + number_of_blocks > self.block_count {
@@ -311,13 +317,20 @@ impl Drive {
         }
     }
 
-    pub fn size_in_kib(&self) -> usize { self.block_count as usize / 2 }
+    pub fn size_in_kib(&self) -> usize {
+        self.block_count / 2
+    }
 }
 
 impl BlockDevice for Drive {
     const BLOCK_SIZE: u32 = 512;
     type Error = AtaError;
-    fn read(&self, buf: &mut [u8], address: usize, number_of_blocks: usize) -> Result<(), Self::Error> {
+    fn read(
+        &self,
+        buf: &mut [u8],
+        address: usize,
+        number_of_blocks: usize,
+    ) -> Result<(), Self::Error> {
         const BLOCK_SIZE: usize = Drive::BLOCK_SIZE as usize;
         if buf.len() != number_of_blocks * BLOCK_SIZE {
             return Err(AtaError::WrongSizeBuffer);
@@ -326,11 +339,20 @@ impl BlockDevice for Drive {
         let mut buses = BUSES.lock();
         for i in 0..number_of_blocks {
             let off = i * BLOCK_SIZE;
-            buses[self.bus].read(self.drive, (address + i) as u32, &mut buf[off..off+BLOCK_SIZE]);
+            buses[self.bus].read(
+                self.drive,
+                (address + i) as u32,
+                &mut buf[off..off + BLOCK_SIZE],
+            );
         }
         Ok(())
     }
-    fn write(&self, buf: &[u8], address: usize, number_of_blocks: usize) -> Result<(), Self::Error> {
+    fn write(
+        &self,
+        buf: &[u8],
+        address: usize,
+        number_of_blocks: usize,
+    ) -> Result<(), Self::Error> {
         const BLOCK_SIZE: usize = Drive::BLOCK_SIZE as usize;
         if buf.len() != number_of_blocks * BLOCK_SIZE {
             return Err(AtaError::WrongSizeBuffer);
@@ -339,7 +361,11 @@ impl BlockDevice for Drive {
         let mut buses = BUSES.lock();
         for i in 0..number_of_blocks {
             let off = i * BLOCK_SIZE;
-            buses[self.bus].write(self.drive, (address + i) as u32, &buf[off..off+BLOCK_SIZE]);
+            buses[self.bus].write(
+                self.drive,
+                (address + i) as u32,
+                &buf[off..off + BLOCK_SIZE],
+            );
         }
         Ok(())
     }
@@ -360,9 +386,15 @@ impl Partition {
             num_bytes: num_blocks * Drive::BLOCK_SIZE as usize,
         }
     }
-    pub fn size_in_kib(&self) -> usize { self.num_bytes / 1024 }
+    pub fn size_in_kib(&self) -> usize {
+        self.num_bytes / 1024
+    }
 
-    fn check_address_in_bounds(&self, address: usize, number_of_blocks: usize) -> Result<(), AtaError> {
+    fn check_address_in_bounds(
+        &self,
+        address: usize,
+        number_of_blocks: usize,
+    ) -> Result<(), AtaError> {
         const BLOCK_SIZE: usize = Drive::BLOCK_SIZE as usize;
         if address + (number_of_blocks * BLOCK_SIZE) > self.num_bytes {
             Err(AtaError::OutOfBounds)
@@ -375,13 +407,25 @@ impl Partition {
 impl BlockDevice for Partition {
     const BLOCK_SIZE: u32 = Drive::BLOCK_SIZE;
     type Error = AtaError;
-    fn read(&self, buf: &mut [u8], address: usize, number_of_blocks: usize) -> Result<(), Self::Error> {
+    fn read(
+        &self,
+        buf: &mut [u8],
+        address: usize,
+        number_of_blocks: usize,
+    ) -> Result<(), Self::Error> {
         self.check_address_in_bounds(address, number_of_blocks)?;
-        self.drive.read(buf, address + self.start_byte, number_of_blocks)
+        self.drive
+            .read(buf, address + self.start_byte, number_of_blocks)
     }
-    fn write(&self, buf: &[u8], address: usize, number_of_blocks: usize) -> Result<(), Self::Error> {
+    fn write(
+        &self,
+        buf: &[u8],
+        address: usize,
+        number_of_blocks: usize,
+    ) -> Result<(), Self::Error> {
         self.check_address_in_bounds(address, number_of_blocks)?;
-        self.drive.write(buf, address + self.start_byte, number_of_blocks)
+        self.drive
+            .write(buf, address + self.start_byte, number_of_blocks)
     }
 }
 
@@ -393,7 +437,9 @@ pub struct DriveInfo {
 }
 
 impl DriveInfo {
-    pub fn size_in_kib(&self) -> usize { self.drive.size_in_kib() }
+    pub fn size_in_kib(&self) -> usize {
+        self.drive.size_in_kib()
+    }
 }
 
 pub fn list() -> Vec<DriveInfo> {

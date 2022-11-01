@@ -10,7 +10,7 @@ Relies heavily on the [`bootloader`](https://github.com/rust-osdev/bootloader) c
 - Pretty bitmap font
 - Exception and interrupt handling
 - Heap allocations with [`linked-list-allocator`](https://github.com/rust-osdev/linked-list-allocator)
-- Harddrive access with ATA, FAT32 filesystem
+- Hard disk access with ATA, FAT32 filesystem
 - Userspace ELF programs
   - Switching to ring 3 (userspace), context switching between programs
   - Separate virtual memory for each program, kernel memory is always mapped

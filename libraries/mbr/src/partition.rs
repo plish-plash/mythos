@@ -1,4 +1,3 @@
-
 /// The type of a particular partition.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum PartitionType {
@@ -14,7 +13,6 @@ pub enum PartitionType {
 }
 
 impl PartitionType {
-
     /// Parses a partition type from the type byte in the MBR's table.
     pub fn from_mbr_tag_byte(tag: u8) -> PartitionType {
         match tag {
@@ -55,7 +53,7 @@ pub struct PartitionTableEntry {
 
     /// The index of the first block of this entry.
     pub logical_block_address: u32,
-    
+
     /// The total number of blocks in this entry.
     pub sector_count: u32,
 }

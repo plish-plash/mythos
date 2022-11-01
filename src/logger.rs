@@ -1,6 +1,9 @@
+use crate::{
+    graphics,
+    screen::{Palette, PaletteColor, Screen, TextScreen},
+};
 use core::fmt::Write;
-use log::{Record, Level, Metadata};
-use crate::{graphics, screen::{Screen, TextScreen, Palette, PaletteColor}};
+use log::{Level, Metadata, Record};
 
 static KERNEL_TEXT_SCREEN: spin::Mutex<TextScreen> = spin::Mutex::new(TextScreen::kernel_new());
 
@@ -22,20 +25,29 @@ struct TextWriter<'a> {
 
 impl<'a> TextWriter<'a> {
     fn lock_kernel_screen(log_level: Level) -> TextWriter<'static> {
-        TextWriter { x_position: 0, color: log_level.into_color(), screen: KERNEL_TEXT_SCREEN.lock() }
+        TextWriter {
+            x_position: 0,
+            color: log_level.into_color(),
+            screen: KERNEL_TEXT_SCREEN.lock(),
+        }
     }
     fn write_byte(&mut self, byte: u8) {
         match byte {
             b'\n' => {
                 self.scroll_up();
                 self.x_position = 0;
-            },
+            }
             byte => {
                 if self.x_position >= TextScreen::WIDTH {
                     self.scroll_up();
                     self.x_position = 0;
                 }
-                self.screen.set_char(self.x_position, TextScreen::HEIGHT - 1, byte - 0x20, self.color);
+                self.screen.set_char(
+                    self.x_position,
+                    TextScreen::HEIGHT - 1,
+                    byte - 0x20,
+                    self.color,
+                );
                 self.x_position += 1;
             }
         }
@@ -86,8 +98,8 @@ pub fn init() -> Result<(), log::SetLoggerError> {
         let mut palette = Palette::new();
         palette.set_color(Level::Trace.into_color(), fb.pack_color(128, 128, 255));
         palette.set_color(Level::Debug.into_color(), fb.pack_color(192, 192, 192));
-        palette.set_color(Level::Info.into_color(),  fb.pack_color(255, 255, 255));
-        palette.set_color(Level::Warn.into_color(),  fb.pack_color(255, 128, 0));
+        palette.set_color(Level::Info.into_color(), fb.pack_color(255, 255, 255));
+        palette.set_color(Level::Warn.into_color(), fb.pack_color(255, 128, 0));
         palette.set_color(Level::Error.into_color(), fb.pack_color(255, 0, 0));
         palette
     });

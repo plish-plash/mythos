@@ -1,9 +1,9 @@
+use crate::{elf_loader, filesystem::get_filesystem, memory::*, screen::*, userspace};
 use alloc::vec::Vec;
 use core::alloc::GlobalAlloc;
-use x86_64::VirtAddr;
 use fat32::dir::DirError;
 use kernel_common::UserError;
-use crate::{elf_loader, userspace, memory::*, screen::*, filesystem::get_filesystem};
+use x86_64::VirtAddr;
 
 #[derive(Debug)]
 pub enum ProgramError {
@@ -27,7 +27,11 @@ struct UserProgram {
 
 impl UserProgram {
     fn new(context: MemoryContext) -> UserProgram {
-        UserProgram { context, stack: 0, has_screen: false }
+        UserProgram {
+            context,
+            stack: 0,
+            has_screen: false,
+        }
     }
 }
 
@@ -54,9 +58,14 @@ fn pop_program() {
 pub fn load_program(program_file: &str) -> Result<VirtAddr, ProgramError> {
     log::info!("Loading program {}", program_file);
     let filesystem = get_filesystem().ok_or(ProgramError::FilesystemMissing)?;
-    let file = filesystem.root_dir().cd("programs")?.open_file(program_file)?;
-    let mut user_mapper = UserMemoryMapper::init().map_err(|_| ProgramError::MemoryMappingFailed)?;
-    let (user_entry, _tls_template) = elf_loader::load_from_disk(&mut user_mapper, file).map_err(|err| ProgramError::ElfError(err))?;
+    let file = filesystem
+        .root_dir()
+        .cd("programs")?
+        .open_file(program_file)?;
+    let mut user_mapper =
+        UserMemoryMapper::init().map_err(|_| ProgramError::MemoryMappingFailed)?;
+    let (user_entry, _tls_template) =
+        elf_loader::load_from_disk(&mut user_mapper, file).map_err(ProgramError::ElfError)?;
     let context = user_mapper.finish_load();
     push_program(UserProgram::new(context));
     log::debug!("  entry point:{:#X}", user_entry);
@@ -85,7 +94,9 @@ pub fn current_program_exit() -> ! {
 }
 
 pub fn with_current_program_allocator<F, R>(func: F) -> R
-        where F: FnOnce(&mut dyn GlobalAlloc) -> R {
+where
+    F: FnOnce(&mut dyn GlobalAlloc) -> R,
+{
     let mut program_stack = PROGRAM_STACK.lock();
     let current_program = program_stack.last_mut().unwrap();
     func(&mut current_program.context.allocator)
@@ -95,7 +106,7 @@ fn push_screen(screen: Screen) -> Result<(), UserError> {
     let mut program_stack = PROGRAM_STACK.lock();
     let current_program = program_stack.last_mut().unwrap();
     if current_program.has_screen {
-        return Err(UserError::HasExistingScreen)
+        return Err(UserError::HasExistingScreen);
     }
     current_program.has_screen = true;
     SCREEN_STACK.lock().push(screen);
@@ -106,7 +117,7 @@ fn pop_screen() -> Result<(), UserError> {
     let mut program_stack = PROGRAM_STACK.lock();
     let current_program = program_stack.last_mut().unwrap();
     if !current_program.has_screen {
-        return Err(UserError::MissingScreen)
+        return Err(UserError::MissingScreen);
     }
     current_program.has_screen = false;
     SCREEN_STACK.lock().pop();

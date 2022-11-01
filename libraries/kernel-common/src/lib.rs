@@ -38,7 +38,7 @@ impl TryFrom<u64> for UserError {
             UserError::INVALID_VALUE => Ok(UserError::InvalidValue),
             UserError::MISSING_SCREEN => Ok(UserError::MissingScreen),
             UserError::HAS_EXISTING_SCREEN => Ok(UserError::HasExistingScreen),
-            _ => Err(())
+            _ => Err(()),
         }
     }
 }

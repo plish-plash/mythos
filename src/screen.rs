@@ -9,7 +9,9 @@ pub trait Screen {
 pub struct PaletteColor(u8);
 
 impl PaletteColor {
-    pub fn new(idx: u8) -> PaletteColor { PaletteColor(idx) }
+    pub fn new(idx: u8) -> PaletteColor {
+        PaletteColor(idx)
+    }
 }
 
 pub struct Palette {
@@ -95,7 +97,16 @@ impl TextScreen {
         } else {
             let ch = ch as usize;
             let font_cols = TEXT_SCREEN_FONT.width / TEXT_SCREEN_FONT.char_size.0;
-            fb.draw_font_char(x, y, &TEXT_SCREEN_FONT, ch % font_cols, ch / font_cols, Self::FONT_SCALE, fg_color, COLOR_BLACK);
+            fb.draw_font_char(
+                x,
+                y,
+                &TEXT_SCREEN_FONT,
+                ch % font_cols,
+                ch / font_cols,
+                Self::FONT_SCALE,
+                fg_color,
+                COLOR_BLACK,
+            );
         }
     }
 }
@@ -125,7 +136,4 @@ impl Screen for TextScreen {
     }
 }
 
-pub struct ImageScreen {
-
-}
-
+pub struct ImageScreen {}

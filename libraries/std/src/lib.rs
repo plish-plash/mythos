@@ -1,14 +1,13 @@
 #![feature(core_intrinsics)]
 #![feature(alloc_error_handler)]
 #![no_std]
-
 extern crate alloc;
 
-pub use core::*;
 pub use alloc::*;
+pub use core::*;
 
-use core::arch::asm;
 use core::alloc::{GlobalAlloc, Layout};
+use core::arch::asm;
 use kernel_common::*;
 
 fn syscall(id: Syscall, arg_base: u64, arg_len: u64) -> Result<u64, UserError> {
@@ -44,7 +43,12 @@ macro_rules! entry_point {
 fn panic(info: &panic::PanicInfo) -> ! {
     let info = format!("{}", info);
     let info = info.as_bytes();
-    syscall(Syscall::ProgramPanic, info.as_ptr() as u64, info.len() as u64).unwrap_or_default();
+    syscall(
+        Syscall::ProgramPanic,
+        info.as_ptr() as u64,
+        info.len() as u64,
+    )
+    .unwrap_or_default();
     unreachable!();
 }
 

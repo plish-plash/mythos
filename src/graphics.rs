@@ -1,5 +1,4 @@
 use bootloader::boot_info::{self, PixelFormat};
-use spin;
 
 pub struct FontData<'a> {
     pub buffer: &'a [u8],
@@ -15,7 +14,9 @@ impl FrameBuffer {
         let idx = idx * self.0.info().bytes_per_pixel;
         let buffer = self.0.buffer_mut();
         let buffer = &mut buffer[idx] as *mut u8 as *mut u32;
-        unsafe { *buffer = color; }
+        unsafe {
+            *buffer = color;
+        }
     }
 
     pub fn info(&self) -> boot_info::FrameBufferInfo {
@@ -45,9 +46,20 @@ impl FrameBuffer {
             idx += stride - w;
         }
     }
-    pub fn draw_font_char(&mut self, x: usize, y: usize, font: &FontData, source_x: usize, source_y: usize, source_scale: usize, fg_color: u32, bg_color: u32) {
+    pub fn draw_font_char(
+        &mut self,
+        x: usize,
+        y: usize,
+        font: &FontData,
+        source_x: usize,
+        source_y: usize,
+        source_scale: usize,
+        fg_color: u32,
+        bg_color: u32,
+    ) {
         let stride = self.0.info().stride;
-        let mut source_idx = (source_x * font.char_size.0) + (source_y * font.char_size.1 * font.width);
+        let mut source_idx =
+            (source_x * font.char_size.0) + (source_y * font.char_size.1 * font.width);
         let mut source_skip_x = 1;
         let mut source_skip_y = 1;
         let mut dest_idx = x + (y * stride);

@@ -1,11 +1,14 @@
-use core::arch::asm;
-use x86_64::{
-    VirtAddr,
-    structures::{gdt::{GlobalDescriptorTable, Descriptor, SegmentSelector}, tss::TaskStateSegment},
-    registers::segmentation::Segment,
-};
-use kernel_common::*;
 use crate::{memory, program};
+use core::arch::asm;
+use kernel_common::*;
+use x86_64::{
+    registers::segmentation::Segment,
+    structures::{
+        gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector},
+        tss::TaskStateSegment,
+    },
+    VirtAddr,
+};
 
 static mut TSS: TaskStateSegment = TaskStateSegment::new();
 static mut GDT: GlobalDescriptorTable = GlobalDescriptorTable::new();
@@ -29,7 +32,13 @@ impl Segments {
         let tss = gdt.add_entry(Descriptor::tss_segment(unsafe { &TSS }));
         let user_data = gdt.add_entry(Descriptor::user_data_segment());
         let user_code = gdt.add_entry(Descriptor::user_code_segment());
-        Segments { kernel_code, kernel_data, user_code, user_data, tss }
+        Segments {
+            kernel_code,
+            kernel_data,
+            user_code,
+            user_data,
+            tss,
+        }
     }
 }
 
@@ -37,8 +46,10 @@ pub fn init_gdt() {
     // Setup TSS
     unsafe {
         TSS.privilege_stack_table[0] = memory::KERNEL_STACK_MEMORY.stack_start();
-        TSS.interrupt_stack_table[0] = VirtAddr::from_ptr(INTERRUPT_STACK.as_ptr_range().end.offset(-16));
-        TSS.interrupt_stack_table[1] = VirtAddr::from_ptr(DOUBLE_FAULT_STACK.as_ptr_range().end.offset(-16));
+        TSS.interrupt_stack_table[0] =
+            VirtAddr::from_ptr(INTERRUPT_STACK.as_ptr_range().end.offset(-16));
+        TSS.interrupt_stack_table[1] =
+            VirtAddr::from_ptr(DOUBLE_FAULT_STACK.as_ptr_range().end.offset(-16));
     }
 
     // Setup GDT
@@ -56,12 +67,16 @@ unsafe fn setup_userspace(segments: &Segments) {
     use x86_64::registers::model_specific::*;
     // Enable syscall and sysret
     Efer::update(|flags| {
-       *flags |= EferFlags::SYSTEM_CALL_EXTENSIONS;
+        *flags |= EferFlags::SYSTEM_CALL_EXTENSIONS;
     });
     // Setup segments
     Star::write(
-        segments.user_code, segments.user_data,
-        segments.kernel_code, segments.kernel_data).unwrap();
+        segments.user_code,
+        segments.user_data,
+        segments.kernel_code,
+        segments.kernel_data,
+    )
+    .unwrap();
     // Set jump point for when userspace executes syscall
     LStar::write(VirtAddr::from_ptr(syscall as *const ()));
 }
@@ -72,7 +87,7 @@ pub fn enter_userspace(entry_point: VirtAddr) -> ! {
         asm!(
             "mov rsp, {stack}",
             "mov r11, 0x202",
-	        "sysretq",
+            "sysretq",
             stack = in(reg) user_stack,
             in("rcx") entry_point.as_u64(),
             options(noreturn),
@@ -97,17 +112,23 @@ fn unpack_layout(arg: u64) -> core::alloc::Layout {
     core::alloc::Layout::from_size_align(
         (arg & u32::MAX as u64) as usize,
         ((arg >> 32) & u32::MAX as u64) as usize,
-    ).unwrap()
+    )
+    .unwrap()
 }
 
 #[no_mangle]
-extern "sysv64" fn _syscall_handler(id: Syscall, arg_base: u64, arg_len: u64, user_stack: u64) -> u64 {
+extern "sysv64" fn _syscall_handler(
+    id: Syscall,
+    arg_base: u64,
+    arg_len: u64,
+    user_stack: u64,
+) -> u64 {
     let mut result = Ok(0);
     match id {
         Syscall::InfoOsName => {
             // TODO
             log::info!("Hello from userspace!");
-        },
+        }
         Syscall::InfoOsVersion => unimplemented!(),
         Syscall::MemAlloc => program::with_current_program_allocator(|alloc| {
             let layout = unpack_layout(arg_len);
@@ -115,7 +136,9 @@ extern "sysv64" fn _syscall_handler(id: Syscall, arg_base: u64, arg_len: u64, us
         }),
         Syscall::MemDealloc => program::with_current_program_allocator(|alloc| {
             let layout = unpack_layout(arg_len);
-            unsafe { alloc.dealloc(arg_base as *mut u8, layout); }
+            unsafe {
+                alloc.dealloc(arg_base as *mut u8, layout);
+            }
         }),
         Syscall::MemAllocZeroed => program::with_current_program_allocator(|alloc| {
             let layout = unpack_layout(arg_len);
@@ -124,7 +147,8 @@ extern "sysv64" fn _syscall_handler(id: Syscall, arg_base: u64, arg_len: u64, us
         Syscall::MemRealloc => unimplemented!(),
         Syscall::ProgramExit => program::current_program_exit(),
         Syscall::ProgramPanic => {
-            let info = unsafe { core::slice::from_raw_parts(arg_base as *const u8, arg_len as usize) };
+            let info =
+                unsafe { core::slice::from_raw_parts(arg_base as *const u8, arg_len as usize) };
             let info = core::str::from_utf8(info).unwrap();
             log::warn!("Program aborted: {}", info);
             crate::logger::show_kernel_screen();

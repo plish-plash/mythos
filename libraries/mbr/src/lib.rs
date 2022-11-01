@@ -1,15 +1,14 @@
 #![no_std]
 
-extern crate byteorder;
 use byteorder::{ByteOrder, LittleEndian};
 
 mod error;
-pub use error::{MbrError, ErrorCause};
+pub use error::{ErrorCause, MbrError};
 
 mod partition;
 pub use partition::*;
 
-/// A struct representing an MBR partition table. 
+/// A struct representing an MBR partition table.
 pub struct MasterBootRecord {
     pub entries: [PartitionTableEntry; MAX_ENTRIES],
 }
@@ -21,9 +20,8 @@ const SUFFIX_BYTES: [u8; 2] = [0x55, 0xaa];
 const MAX_ENTRIES: usize = (BUFFER_SIZE - TABLE_OFFSET - 2) / ENTRY_SIZE;
 
 impl MasterBootRecord {
-
-    /// Parses the MBR table from a raw byte buffer. 
-    /// 
+    /// Parses the MBR table from a raw byte buffer.
+    ///
     /// Throws an error in the following cases:
     /// * `BufferWrongSizeError` if `bytes.len()` is less than 512
     /// * `InvalidMBRSuffix` if the final 2 bytes in `bytes` are not `[0x55, 0xaa]`
@@ -31,9 +29,14 @@ impl MasterBootRecord {
     pub fn from_bytes<T: AsRef<[u8]>>(bytes: &T) -> Result<MasterBootRecord, MbrError> {
         let buffer: &[u8] = bytes.as_ref();
         if buffer.len() < BUFFER_SIZE {
-            return Err(MbrError::from_cause(ErrorCause::BufferWrongSizeError{expected : BUFFER_SIZE, actual : buffer.len()}));
+            return Err(MbrError::from_cause(ErrorCause::BufferWrongSizeError {
+                expected: BUFFER_SIZE,
+                actual: buffer.len(),
+            }));
         } else if buffer[BUFFER_SIZE - SUFFIX_BYTES.len()..BUFFER_SIZE] != SUFFIX_BYTES[..] {
-            return Err(MbrError::from_cause(ErrorCause::InvalidMBRSuffix{actual : [buffer[BUFFER_SIZE - 2], buffer[BUFFER_SIZE -1]]}));
+            return Err(MbrError::from_cause(ErrorCause::InvalidMBRSuffix {
+                actual: [buffer[BUFFER_SIZE - 2], buffer[BUFFER_SIZE - 1]],
+            }));
         }
         let mut entries = [PartitionTableEntry::empty(); MAX_ENTRIES];
         for idx in 0..MAX_ENTRIES {
@@ -50,18 +53,21 @@ impl MasterBootRecord {
         Ok(MasterBootRecord { entries })
     }
 
-    /// Serializes this MBR partition table to a raw byte buffer. 
-    
+    /// Serializes this MBR partition table to a raw byte buffer.
+
     /// Throws an error in the following cases:
     /// * `BufferWrongSizeError` if `buffer.len()` is less than 512
-    /// 
+    ///
     /// Note that it only affects the partition table itself, which only appears starting
     /// from byte `446` of the MBR; no bytes before this are affected, even though it is
-    /// still necessary to pass a full `512` byte buffer. 
+    /// still necessary to pass a full `512` byte buffer.
     pub fn serialize<T: AsMut<[u8]>>(&self, buffer: &mut T) -> Result<usize, MbrError> {
         let buffer: &mut [u8] = buffer.as_mut();
         if buffer.len() < BUFFER_SIZE {
-            return Err(MbrError::from_cause(ErrorCause::BufferWrongSizeError{expected : BUFFER_SIZE, actual : buffer.len()}));
+            return Err(MbrError::from_cause(ErrorCause::BufferWrongSizeError {
+                expected: BUFFER_SIZE,
+                actual: buffer.len(),
+            }));
         }
         {
             let suffix: &mut [u8] = &mut buffer[BUFFER_SIZE - SUFFIX_BYTES.len()..BUFFER_SIZE];

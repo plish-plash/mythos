@@ -25,7 +25,10 @@ fn main() {
     let kernel_manifest_path = locate_cargo_manifest::locate_manifest().unwrap();
 
     let bios = create_disk_image(&kernel_binary_path, &kernel_manifest_path);
-    let user_partition = kernel_manifest_path.parent().unwrap().join("target/user_partition.img");
+    let user_partition = kernel_manifest_path
+        .parent()
+        .unwrap()
+        .join("target/user_partition.img");
     add_disk_partition::modify_file(&bios, &user_partition).unwrap();
 
     if no_boot {
