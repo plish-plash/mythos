@@ -57,6 +57,7 @@ pub enum Syscall {
     ProgramExit = 0x0300,
     ProgramPanic,
     ProgramLoad,
+    ProgramWaitForConfirm,
     ScreenCreate = 0x0400,
     ScreenSetChar,
     ScreenSetPixel,

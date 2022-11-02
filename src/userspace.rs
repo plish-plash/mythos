@@ -1,6 +1,7 @@
 use crate::{memory, program};
 use core::arch::asm;
 use kernel_common::*;
+use uniquelock::UniqueOnce;
 use x86_64::{
     registers::segmentation::Segment,
     structures::{
@@ -10,8 +11,8 @@ use x86_64::{
     VirtAddr,
 };
 
-static mut TSS: TaskStateSegment = TaskStateSegment::new();
-static mut GDT: GlobalDescriptorTable = GlobalDescriptorTable::new();
+static TSS: UniqueOnce<TaskStateSegment> = UniqueOnce::new();
+static GDT: UniqueOnce<GlobalDescriptorTable> = UniqueOnce::new();
 
 const STACK_SIZE: usize = 4096 * 2;
 static mut INTERRUPT_STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
@@ -29,7 +30,7 @@ impl Segments {
     fn init(gdt: &mut GlobalDescriptorTable) -> Segments {
         let kernel_code = gdt.add_entry(Descriptor::kernel_code_segment());
         let kernel_data = gdt.add_entry(Descriptor::kernel_data_segment());
-        let tss = gdt.add_entry(Descriptor::tss_segment(unsafe { &TSS }));
+        let tss = gdt.add_entry(Descriptor::tss_segment(TSS.get().unwrap()));
         let user_data = gdt.add_entry(Descriptor::user_data_segment());
         let user_code = gdt.add_entry(Descriptor::user_code_segment());
         Segments {
@@ -44,18 +45,23 @@ impl Segments {
 
 pub fn init_gdt() {
     // Setup TSS
-    unsafe {
-        TSS.privilege_stack_table[0] = memory::KERNEL_STACK_MEMORY.stack_start();
-        TSS.interrupt_stack_table[0] =
-            VirtAddr::from_ptr(INTERRUPT_STACK.as_ptr_range().end.offset(-16));
-        TSS.interrupt_stack_table[1] =
-            VirtAddr::from_ptr(DOUBLE_FAULT_STACK.as_ptr_range().end.offset(-16));
-    }
+    TSS.call_once(|| {
+        let mut tss = TaskStateSegment::new();
+        tss.privilege_stack_table[0] = memory::KERNEL_STACK_MEMORY.stack_start();
+        tss.interrupt_stack_table[0] =
+            unsafe { VirtAddr::from_ptr(INTERRUPT_STACK.as_ptr_range().end.offset(-16)) };
+        tss.interrupt_stack_table[1] =
+            unsafe { VirtAddr::from_ptr(DOUBLE_FAULT_STACK.as_ptr_range().end.offset(-16)) };
+        tss
+    })
+    .expect("init_gdt called twice");
 
     // Setup GDT
+    let mut gdt = GlobalDescriptorTable::new();
+    let segments = Segments::init(&mut gdt);
+    GDT.call_once(|| gdt).unwrap();
+    GDT.get().unwrap().load();
     unsafe {
-        let segments = Segments::init(&mut GDT);
-        GDT.load();
         x86_64::registers::segmentation::CS::set_reg(segments.kernel_code);
         x86_64::registers::segmentation::SS::set_reg(segments.kernel_data);
         x86_64::instructions::tables::load_tss(segments.tss);
@@ -165,6 +171,10 @@ extern "sysv64" fn _syscall_handler(
             program::current_program_exit();
         }
         Syscall::ProgramLoad => unimplemented!(),
+        Syscall::ProgramWaitForConfirm => {
+            program::current_program_wait();
+            Ok(0)
+        }
         Syscall::ScreenCreate => unpack_bool(arg_base)
             .and_then(|arg| program::create_screen(arg))
             .map(|_| 0),

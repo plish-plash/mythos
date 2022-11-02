@@ -10,6 +10,8 @@
       <sourceFolder url="file://$MODULE_DIR$/libraries/std/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/os-runner/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/programs/raytrace/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/libraries/pack-u64/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/libraries/uniquelock/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

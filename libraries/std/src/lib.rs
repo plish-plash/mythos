@@ -14,6 +14,19 @@ use kernel_common::*;
 
 pub type SystemError = UserError;
 
+#[macro_export]
+macro_rules! entry_point {
+    ($path:path) => {
+        #[no_mangle]
+        pub extern "C" fn _start() -> ! {
+            let f: fn() = $path; // validate entry point signature
+            f();
+            $crate::exit();
+            unreachable!();
+        }
+    };
+}
+
 fn pack_u32s(a: u64, b: u64) -> u64 {
     ((a & u32::MAX as u64) << 32) | (b & u32::MAX as u64)
 }
@@ -34,19 +47,6 @@ fn syscall(id: Syscall, arg_base: u64, arg_len: u64) -> Result<u64, SystemError>
     }
 }
 
-#[macro_export]
-macro_rules! entry_point {
-    ($path:path) => {
-        #[no_mangle]
-        pub extern "C" fn _start() -> ! {
-            let f: fn() = $path; // validate entry point signature
-            f();
-            $crate::exit();
-            unreachable!();
-        }
-    };
-}
-
 #[panic_handler]
 fn panic(info: &panic::PanicInfo) -> ! {
     let info = format!("{}", info);
@@ -63,10 +63,6 @@ fn panic(info: &panic::PanicInfo) -> ! {
 #[alloc_error_handler]
 fn alloc_error_handler(layout: Layout) -> ! {
     panic!("alloc failed: {:?}", layout);
-}
-
-pub fn exit() {
-    syscall(Syscall::ProgramExit, 0, 0).unwrap_or_default();
 }
 
 struct SystemAllocator;
@@ -91,4 +87,12 @@ unsafe impl GlobalAlloc for SystemAllocator {
     // unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
     //     syscall(Syscall::MemRealloc, ptr as u64, pack_layout(layout)).unwrap() as *mut u8
     // }
+}
+
+pub fn exit() {
+    syscall(Syscall::ProgramExit, 0, 0).unwrap_or_default();
+}
+
+pub fn wait_for_confirm() {
+    syscall(Syscall::ProgramWaitForConfirm, 0, 0).unwrap();
 }

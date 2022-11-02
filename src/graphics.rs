@@ -1,4 +1,5 @@
 use bootloader::boot_info::{self, PixelFormat};
+use uniquelock::{UniqueGuard, UniqueLock, UniqueOnce};
 
 pub struct FontData<'a> {
     pub buffer: &'a [u8],
@@ -93,15 +94,20 @@ impl FrameBuffer {
     }
 }
 
-static GLOBAL_FRAMEBUFFER: spin::Once<spin::Mutex<FrameBuffer>> = spin::Once::new();
+static GLOBAL_FRAMEBUFFER: UniqueOnce<UniqueLock<FrameBuffer>> = UniqueOnce::new();
 
 pub fn set_global_framebuffer(framebuffer: &'static mut boot_info::FrameBuffer) {
-    GLOBAL_FRAMEBUFFER.call_once(|| {
-        assert_eq!(framebuffer.info().bytes_per_pixel, 4);
-        spin::Mutex::new(FrameBuffer(framebuffer))
-    });
+    GLOBAL_FRAMEBUFFER
+        .call_once(|| {
+            assert_eq!(framebuffer.info().bytes_per_pixel, 4);
+            UniqueLock::new("framebuffer", FrameBuffer(framebuffer))
+        })
+        .expect("set_global_framebuffer called twice");
 }
 
-pub fn get_global_framebuffer() -> Option<spin::MutexGuard<'static, FrameBuffer>> {
-    GLOBAL_FRAMEBUFFER.get().map(|mtx| mtx.lock())
+pub fn get_global_framebuffer() -> Option<UniqueGuard<'static, FrameBuffer>> {
+    GLOBAL_FRAMEBUFFER
+        .get()
+        .ok()
+        .and_then(|mtx| mtx.lock().ok())
 }

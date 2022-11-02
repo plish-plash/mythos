@@ -15,7 +15,7 @@ mod program;
 mod screen;
 mod userspace;
 
-use ata::BlockDevice;
+use ata::{AtaError, BlockDevice};
 use bootloader::{boot_info::FrameBufferInfo, entry_point, BootInfo};
 use core::panic::PanicInfo;
 
@@ -27,8 +27,15 @@ static OS_VERSION: &str = env!("CARGO_PKG_VERSION");
 enum KernelInitError {
     FramebufferWrongSize,
     PhysicalMemoryNotMapped,
-    AtaFailed,
+    AtaError(AtaError),
+    AtaNoDrive,
     InvalidDiskMbr,
+}
+
+impl From<AtaError> for KernelInitError {
+    fn from(err: AtaError) -> Self {
+        KernelInitError::AtaError(err)
+    }
 }
 
 entry_point!(kernel_main);
@@ -73,7 +80,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     idt::init_interrupts();
 
     log::info!("Initializing ATA");
-    ata::init();
     let drive_info = get_first_ata_drive().unwrap();
     log::debug!(
         "Found drive {} size:{}KiB",
@@ -82,7 +88,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     );
     let user_partition = get_user_partition(drive_info.drive).unwrap();
     log::debug!("  user partition size:{}KiB", user_partition.size_in_kib());
-    filesystem::init(user_partition);
+    filesystem::init_fs(user_partition);
     let entry_point = program::load_program("raytrace.elf").unwrap();
     userspace::enter_userspace(entry_point);
 }
@@ -99,10 +105,11 @@ fn check_framebuffer_size(fb_info: FrameBufferInfo) -> Result<(), KernelInitErro
 }
 
 fn get_first_ata_drive() -> Result<ata::DriveInfo, KernelInitError> {
-    ata::list()
+    ata::init()?;
+    ata::list()?
         .into_iter()
         .next()
-        .ok_or(KernelInitError::AtaFailed)
+        .ok_or(KernelInitError::AtaNoDrive)
 }
 
 fn get_user_partition(drive: ata::Drive) -> Result<ata::Partition, KernelInitError> {

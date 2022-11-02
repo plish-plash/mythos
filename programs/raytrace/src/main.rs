@@ -1,9 +1,9 @@
 #![no_main]
 #![no_std]
 
-use std::screen;
+use std::{entry_point, screen, wait_for_confirm};
 
-std::entry_point!(main);
+entry_point!(main);
 
 fn main() {
     screen::create(true).unwrap();
@@ -15,5 +15,5 @@ fn main() {
             screen::set_pixel(x, y, screen::Color::new(r, g, b)).unwrap();
         }
     }
-    loop {}
+    wait_for_confirm();
 }

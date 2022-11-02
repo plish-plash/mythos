@@ -1,12 +1,13 @@
 use pc_keyboard::{layouts, DecodedKey, HandleControl, Keyboard, ScancodeSet1};
 use pic8259::ChainedPics;
+use uniquelock::{Spinlock, UniqueLock};
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
 static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();
 
 const PIC_OFFSET: u8 = 32;
-static PICS: spin::Mutex<ChainedPics> =
-    spin::Mutex::new(unsafe { ChainedPics::new(PIC_OFFSET, PIC_OFFSET + 8) });
+static PICS: Spinlock<ChainedPics> =
+    Spinlock::new(unsafe { ChainedPics::new(PIC_OFFSET, PIC_OFFSET + 8) });
 
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
@@ -26,8 +27,8 @@ impl InterruptIndex {
     }
 }
 
-static KEYBOARD: spin::Mutex<Keyboard<layouts::Us104Key, ScancodeSet1>> =
-    spin::Mutex::new(Keyboard::new(HandleControl::Ignore));
+static KEYBOARD: UniqueLock<Keyboard<layouts::Us104Key, ScancodeSet1>> =
+    UniqueLock::new("keyboard", Keyboard::new(HandleControl::Ignore));
 
 pub fn init_idt() {
     unsafe {
@@ -109,16 +110,23 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
 }
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
     use x86_64::instructions::port::Port;
-    let mut keyboard = KEYBOARD.lock();
+    let mut keyboard = KEYBOARD.lock().unwrap();
     let mut port = Port::new(0x60);
     let scancode: u8 = unsafe { port.read() };
+    let mut confirm = false;
     if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
         if let Some(key) = keyboard.process_keyevent(key_event) {
             match key {
-                DecodedKey::Unicode(character) => log::trace!("Keyboard:{}", character),
-                DecodedKey::RawKey(key) => log::trace!("Keyboard:{:?}", key),
+                // DecodedKey::Unicode(character) => log::trace!("Keyboard:{}", character),
+                // DecodedKey::RawKey(key) => log::trace!("Keyboard:{:?}", key),
+                DecodedKey::Unicode(' ') => confirm = true,
+                DecodedKey::Unicode('\n') => confirm = true,
+                _ => (),
             }
         }
+    }
+    if confirm {
+        crate::program::current_program_notify();
     }
     InterruptIndex::Keyboard.end_interrupt();
 }

@@ -7,6 +7,6 @@ edition = "2021"
 
 [dependencies]
 bit_field = "*"
-spin = "*"
 x86_64 = "0.14"
 block_device = "0.1"
+uniquelock = { path = "../../libraries/uniquelock" }

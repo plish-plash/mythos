@@ -1,12 +1,18 @@
 #![no_std]
 
-use byteorder::{ByteOrder, LittleEndian};
-
 mod error;
 pub use error::{ErrorCause, MbrError};
 
 mod partition;
 pub use partition::*;
+
+fn read_u32_le(buf: &[u8]) -> u32 {
+    u32::from_le_bytes(buf.try_into().unwrap())
+}
+fn write_u32_le(buf: &mut [u8], val: u32) {
+    let bytes = val.to_le_bytes();
+    buf.copy_from_slice(&bytes);
+}
 
 /// A struct representing an MBR partition table.
 pub struct MasterBootRecord {
@@ -46,8 +52,9 @@ impl MasterBootRecord {
             // if let PartitionType::Unknown(c) = partition_type {
             //     return Err(MbrError::from_cause(ErrorCause::UnsupportedPartitionError { tag : c}));
             // }
-            let lba = LittleEndian::read_u32(&buffer[offset + 8..]);
-            let len = LittleEndian::read_u32(&buffer[offset + 12..]);
+            let buffer_off = &buffer[offset..];
+            let lba = read_u32_le(&buffer_off[8..12]);
+            let len = read_u32_le(&buffer_off[12..16]);
             entries[idx] = PartitionTableEntry::new(bootable, partition_type, lba, len);
         }
         Ok(MasterBootRecord { entries })
@@ -80,11 +87,11 @@ impl MasterBootRecord {
             buffer[offset + 4] = entry.partition_type.to_mbr_tag_byte();
             {
                 let lba_slice: &mut [u8] = &mut buffer[offset + 8..offset + 12];
-                LittleEndian::write_u32(lba_slice, entry.logical_block_address);
+                write_u32_le(lba_slice, entry.logical_block_address);
             }
             {
                 let len_slice: &mut [u8] = &mut buffer[offset + 12..offset + 16];
-                LittleEndian::write_u32(len_slice, entry.sector_count);
+                write_u32_le(len_slice, entry.sector_count);
             }
         }
         Ok(BUFFER_SIZE)

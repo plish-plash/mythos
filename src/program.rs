@@ -3,6 +3,7 @@ use alloc::vec::Vec;
 use core::alloc::GlobalAlloc;
 use fat32::dir::DirError;
 use kernel_common::{Color, UserError};
+use uniquelock::UniqueLock;
 use x86_64::VirtAddr;
 
 #[derive(Debug)]
@@ -23,6 +24,7 @@ struct UserProgram {
     context: MemoryContext,
     stack: u64,
     has_screen: bool,
+    confirm: bool,
 }
 
 impl UserProgram {
@@ -31,6 +33,7 @@ impl UserProgram {
             context,
             stack: 0,
             has_screen: false,
+            confirm: false,
         }
     }
 }
@@ -50,18 +53,18 @@ impl Screen {
     }
 }
 
-static PROGRAM_STACK: spin::Mutex<Vec<UserProgram>> = spin::Mutex::new(Vec::new());
-static SCREEN_STACK: spin::Mutex<Vec<Screen>> = spin::Mutex::new(Vec::new());
+static PROGRAM_STACK: UniqueLock<Vec<UserProgram>> = UniqueLock::new("program stack", Vec::new());
+static SCREEN_STACK: UniqueLock<Vec<Screen>> = UniqueLock::new("screen stack", Vec::new());
 
 fn push_program(program: UserProgram) {
-    PROGRAM_STACK.lock().push(program);
+    PROGRAM_STACK.lock().unwrap().push(program);
 }
 
 fn pop_program() {
     // TODO reclaim memory used by the program
-    let program = PROGRAM_STACK.lock().pop().unwrap();
+    let program = PROGRAM_STACK.lock().unwrap().pop().unwrap();
     if program.has_screen {
-        SCREEN_STACK.lock().pop();
+        SCREEN_STACK.lock().unwrap().pop();
         set_screen_active(true);
     }
 }
@@ -84,14 +87,14 @@ pub fn load_program(program_file: &str) -> Result<VirtAddr, ProgramError> {
 }
 
 pub fn save_current_user_stack(stack: u64) {
-    let mut program_stack = PROGRAM_STACK.lock();
+    let mut program_stack = PROGRAM_STACK.lock().unwrap();
     let current_program = program_stack.last_mut().unwrap();
     current_program.stack = stack;
 }
 
 pub fn current_program_exit() -> ! {
     pop_program();
-    let mut program_stack = PROGRAM_STACK.lock();
+    let mut program_stack = PROGRAM_STACK.lock().unwrap();
     if let Some(current_program) = program_stack.last_mut() {
         UserMemoryMapper::restore_context(&current_program.context).unwrap();
         userspace::restore_userspace(current_program.stack);
@@ -103,17 +106,42 @@ pub fn current_program_exit() -> ! {
     }
 }
 
+pub fn current_program_wait() {
+    {
+        let mut program_stack = PROGRAM_STACK.lock().unwrap();
+        let current_program = program_stack.last_mut().unwrap();
+        current_program.confirm = false;
+    }
+    let mut confirm = false;
+    while !confirm {
+        x86_64::instructions::hlt();
+        if let Ok(program_stack) = PROGRAM_STACK.lock() {
+            confirm = program_stack.last().unwrap().confirm;
+        }
+    }
+}
+
+pub fn current_program_notify() -> bool {
+    if let Ok(mut program_stack) = PROGRAM_STACK.lock() {
+        if let Some(current_program) = program_stack.last_mut() {
+            current_program.confirm = true;
+            return true;
+        }
+    }
+    false
+}
+
 pub fn with_current_program_allocator<F, R>(func: F) -> R
 where
     F: FnOnce(&mut dyn GlobalAlloc) -> R,
 {
-    let mut program_stack = PROGRAM_STACK.lock();
+    let mut program_stack = PROGRAM_STACK.lock().unwrap();
     let current_program = program_stack.last_mut().unwrap();
     func(&mut current_program.context.allocator)
 }
 
 fn set_screen_active(active: bool) {
-    let mut screen_stack = SCREEN_STACK.lock();
+    let mut screen_stack = SCREEN_STACK.lock().unwrap();
     if let Some(screen) = screen_stack.last_mut() {
         screen.set_active(active);
     } else {
@@ -122,26 +150,26 @@ fn set_screen_active(active: bool) {
 }
 
 fn push_screen(screen: Screen) -> Result<(), UserError> {
-    let mut program_stack = PROGRAM_STACK.lock();
+    let mut program_stack = PROGRAM_STACK.lock().unwrap();
     let current_program = program_stack.last_mut().unwrap();
     if current_program.has_screen {
         return Err(UserError::HasExistingScreen);
     }
     current_program.has_screen = true;
     set_screen_active(false);
-    SCREEN_STACK.lock().push(screen);
+    SCREEN_STACK.lock().unwrap().push(screen);
     set_screen_active(true);
     Ok(())
 }
 
 fn pop_screen() -> Result<(), UserError> {
-    let mut program_stack = PROGRAM_STACK.lock();
+    let mut program_stack = PROGRAM_STACK.lock().unwrap();
     let current_program = program_stack.last_mut().unwrap();
     if !current_program.has_screen {
         return Err(UserError::MissingScreen);
     }
     current_program.has_screen = false;
-    SCREEN_STACK.lock().pop();
+    SCREEN_STACK.lock().unwrap().pop();
     set_screen_active(true);
     Ok(())
 }
@@ -160,12 +188,12 @@ pub fn create_screen(image: bool) -> Result<(), UserError> {
 }
 
 pub fn set_screen_char(x: usize, y: usize, ch: u8, color: u8) -> Result<(), UserError> {
-    let program_stack = PROGRAM_STACK.lock();
+    let program_stack = PROGRAM_STACK.lock().unwrap();
     let current_program = program_stack.last().unwrap();
     if !current_program.has_screen {
         return Err(UserError::MissingScreen);
     }
-    let mut screen_stack = SCREEN_STACK.lock();
+    let mut screen_stack = SCREEN_STACK.lock().unwrap();
     match screen_stack.last_mut().unwrap() {
         Screen::Text(screen) => {
             screen.set_char(x, y, ch, PaletteColor::new(color));
@@ -176,12 +204,12 @@ pub fn set_screen_char(x: usize, y: usize, ch: u8, color: u8) -> Result<(), User
 }
 
 pub fn set_screen_pixel(x: usize, y: usize, r: u8, g: u8, b: u8) -> Result<(), UserError> {
-    let program_stack = PROGRAM_STACK.lock();
+    let program_stack = PROGRAM_STACK.lock().unwrap();
     let current_program = program_stack.last().unwrap();
     if !current_program.has_screen {
         return Err(UserError::MissingScreen);
     }
-    let mut screen_stack = SCREEN_STACK.lock();
+    let mut screen_stack = SCREEN_STACK.lock().unwrap();
     match screen_stack.last_mut().unwrap() {
         Screen::Text(_) => Err(UserError::ScreenWrongType),
         Screen::Image(screen) => {

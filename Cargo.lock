@@ -8,7 +8,7 @@ version = "0.1.0"
 dependencies = [
  "bit_field",
  "block_device",
- "spin",
+ "uniquelock",
  "x86_64",
 ]
 
@@ -52,12 +52,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "byteorder"
-version = "1.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14c189c53d098945499cdfa7ecc63567cf3886b3332b312a5b4585d8d3a6a610"
-
-[[package]]
 name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -85,7 +79,7 @@ dependencies = [
  "mbr",
  "pc-keyboard",
  "pic8259",
- "spin",
+ "uniquelock",
  "x86_64",
  "xmas-elf",
 ]
@@ -140,9 +134,6 @@ dependencies = [
 [[package]]
 name = "mbr"
 version = "0.1.0"
-dependencies = [
- "byteorder",
-]
 
 [[package]]
 name = "os-runner"
@@ -152,6 +143,10 @@ dependencies = [
  "locate-cargo-manifest",
  "mbr",
 ]
+
+[[package]]
+name = "pack-u64"
+version = "0.1.0"
 
 [[package]]
 name = "pc-keyboard"
@@ -188,15 +183,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d29ab0c6d3fc0ee92fe66e2d99f700eab17a8d57d1c1d3b748380fb20baa78cd"
 
 [[package]]
-name = "spin"
-version = "0.9.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f6002a767bff9e83f8eeecf883ecb8011875a21ae8da43bffb817a57e78cc09"
-dependencies = [
- "lock_api",
-]
-
-[[package]]
 name = "spinning_top"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -210,6 +196,13 @@ name = "std"
 version = "0.1.0"
 dependencies = [
  "kernel-common",
+]
+
+[[package]]
+name = "uniquelock"
+version = "0.1.0"
+dependencies = [
+ "spinning_top",
 ]
 
 [[package]]

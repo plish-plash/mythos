@@ -1,6 +1,7 @@
 use alloc::collections::BTreeMap;
 use bootloader::boot_info::{MemoryRegionKind, MemoryRegions};
 use linked_list_allocator::LockedHeap;
+use uniquelock::{UniqueGuard, UniqueLock, UniqueOnce};
 use x86_64::{
     structures::paging::{
         mapper::{MapToError, TranslateError, UnmapError},
@@ -186,13 +187,13 @@ impl MemoryContext {
 }
 
 pub struct UserMemoryMapper {
-    kernel_mapper: spin::MutexGuard<'static, KernelMemoryMapper>,
+    kernel_mapper: UniqueGuard<'static, KernelMemoryMapper>,
     user_context: MemoryContext,
 }
 
 impl UserMemoryMapper {
     pub fn init() -> Result<UserMemoryMapper, MapToError<Size4KiB>> {
-        let kernel_mapper = MEMORY_MAPPER.get().unwrap().lock();
+        let kernel_mapper = MEMORY_MAPPER.get().unwrap().lock().unwrap();
         let mut user_mapper = UserMemoryMapper {
             kernel_mapper,
             user_context: MemoryContext::new(),
@@ -212,7 +213,7 @@ impl UserMemoryMapper {
         self.user_context
     }
     pub fn restore_context(user_context: &MemoryContext) -> Result<(), MapToError<Size4KiB>> {
-        let mut kernel_mapper = MEMORY_MAPPER.get().unwrap().lock();
+        let mut kernel_mapper = MEMORY_MAPPER.get().unwrap().lock().unwrap();
         for (page, (frame, flags)) in user_context.local_map.iter() {
             unsafe {
                 kernel_mapper.map_page(*page, *frame, *flags)?;
@@ -254,7 +255,7 @@ impl MemoryMapper for UserMemoryMapper {
     }
 }
 
-static MEMORY_MAPPER: spin::Once<spin::Mutex<KernelMemoryMapper>> = spin::Once::new();
+static MEMORY_MAPPER: UniqueOnce<UniqueLock<KernelMemoryMapper>> = UniqueOnce::new();
 
 pub fn init_memory(phys_offset: u64, memory_regions: &'static MemoryRegions) {
     // Get physical memory offset.
@@ -262,10 +263,12 @@ pub fn init_memory(phys_offset: u64, memory_regions: &'static MemoryRegions) {
     log::debug!("Physical memory  addr:{:#X}", phys_offset);
 
     // Create kernel mapper and map kernel heap and interrupt stack.
-    MEMORY_MAPPER.call_once(|| {
-        let kernel_mapper = KernelMemoryMapper::init(phys_offset, memory_regions).unwrap();
-        spin::Mutex::new(kernel_mapper)
-    });
+    MEMORY_MAPPER
+        .call_once(|| {
+            let kernel_mapper = KernelMemoryMapper::init(phys_offset, memory_regions).unwrap();
+            UniqueLock::new("memory mapper", kernel_mapper)
+        })
+        .expect("init_memory called twice");
 
     // Setup the allocator to use the newly-mapped heap.
     unsafe {

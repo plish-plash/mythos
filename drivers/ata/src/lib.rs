@@ -1,17 +1,15 @@
 #![no_std]
-
-/// Implementation Courtesy of MOROS.
-/// Currently Only Supports ATA-PIO, with 24-bit LBA Addressing.
 extern crate alloc;
 
-use alloc::string::String;
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 use bit_field::BitField;
-use core::hint::spin_loop;
-use spin::Mutex;
+use uniquelock::UniqueLock;
 use x86_64::instructions::port::{Port, PortReadOnly, PortWriteOnly};
 
 pub use block_device::BlockDevice;
+
+/// Implementation Courtesy of MOROS.
+/// Currently Only Supports ATA-PIO, with 24-bit LBA Addressing.
 
 fn sleep_ticks(ticks: usize) {
     for _ in 0..=ticks {
@@ -139,7 +137,7 @@ impl Bus {
                 return self.reset();
             }
 
-            spin_loop();
+            core::hint::spin_loop();
         }
     }
 
@@ -276,13 +274,20 @@ impl Bus {
     }
 }
 
-static BUSES: Mutex<Vec<Bus>> = Mutex::new(Vec::new());
+static BUSES: UniqueLock<Vec<Bus>> = UniqueLock::new("ATA buses", Vec::new());
 
 #[derive(Debug, Copy, Clone)]
 pub enum AtaError {
+    AlreadyInUse,
     AddressNotAligned,
     OutOfBounds,
     WrongSizeBuffer,
+}
+
+impl From<uniquelock::LockError> for AtaError {
+    fn from(_value: uniquelock::LockError) -> Self {
+        AtaError::AlreadyInUse
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -336,7 +341,7 @@ impl BlockDevice for Drive {
             return Err(AtaError::WrongSizeBuffer);
         }
         let address = self.byte_index_to_lba(address, number_of_blocks)?;
-        let mut buses = BUSES.lock();
+        let mut buses = BUSES.lock()?;
         for i in 0..number_of_blocks {
             let off = i * BLOCK_SIZE;
             buses[self.bus].read(
@@ -358,7 +363,7 @@ impl BlockDevice for Drive {
             return Err(AtaError::WrongSizeBuffer);
         }
         let address = self.byte_index_to_lba(address, number_of_blocks)?;
-        let mut buses = BUSES.lock();
+        let mut buses = BUSES.lock()?;
         for i in 0..number_of_blocks {
             let off = i * BLOCK_SIZE;
             buses[self.bus].write(
@@ -442,8 +447,8 @@ impl DriveInfo {
     }
 }
 
-pub fn list() -> Vec<DriveInfo> {
-    let mut buses = BUSES.lock();
+pub fn list() -> Result<Vec<DriveInfo>, AtaError> {
+    let mut buses = BUSES.lock()?;
     let mut res = Vec::new();
     for bus in 0..2 {
         for drive in 0..2 {
@@ -471,15 +476,16 @@ pub fn list() -> Vec<DriveInfo> {
             }
         }
     }
-    res
+    Ok(res)
 }
 
-pub fn drive_is_present(bus: usize) -> bool {
-    unsafe { BUSES.lock()[bus].status_register.read() != 0xFF }
-}
+// pub fn drive_is_present(bus: usize) -> bool {
+//     unsafe { BUSES.lock()[bus].status_register.read() != 0xFF }
+// }
 
-pub fn init() {
-    let mut buses = BUSES.lock();
+pub fn init() -> Result<(), AtaError> {
+    let mut buses = BUSES.lock()?;
     buses.push(Bus::new(0, 0x1F0, 0x3F6, 14));
     buses.push(Bus::new(1, 0x170, 0x376, 15));
+    Ok(())
 }

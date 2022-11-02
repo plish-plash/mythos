@@ -4,8 +4,10 @@ use crate::{
 };
 use core::fmt::Write;
 use log::{Level, Metadata, Record};
+use uniquelock::{UniqueGuard, UniqueLock};
 
-static KERNEL_TEXT_SCREEN: spin::Mutex<TextScreen> = spin::Mutex::new(TextScreen::kernel_new());
+static KERNEL_TEXT_SCREEN: UniqueLock<TextScreen> =
+    UniqueLock::new("kernel screen", TextScreen::kernel_new());
 
 trait IntoColor {
     fn into_color(self) -> PaletteColor;
@@ -20,16 +22,16 @@ impl IntoColor for Level {
 struct TextWriter<'a> {
     x_position: usize,
     color: PaletteColor,
-    screen: spin::MutexGuard<'a, TextScreen>,
+    screen: UniqueGuard<'a, TextScreen>,
 }
 
 impl<'a> TextWriter<'a> {
-    fn lock_kernel_screen(log_level: Level) -> TextWriter<'static> {
-        TextWriter {
+    fn lock_kernel_screen(log_level: Level) -> Option<TextWriter<'static>> {
+        KERNEL_TEXT_SCREEN.lock().ok().map(|screen| TextWriter {
             x_position: 0,
             color: log_level.into_color(),
-            screen: KERNEL_TEXT_SCREEN.lock(),
-        }
+            screen,
+        })
     }
     fn write_byte(&mut self, byte: u8) {
         match byte {
@@ -79,7 +81,12 @@ impl log::Log for KernelLogger {
     }
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
-            let mut writer = TextWriter::lock_kernel_screen(record.level());
+            let mut writer = if let Some(writer) = TextWriter::lock_kernel_screen(record.level()) {
+                writer
+            } else {
+                // TODO instead of deleting the message when the screen is busy, save it so it can be shown later.
+                return;
+            };
             writer.scroll_up();
             write!(writer, "{}", record.args()).unwrap();
             if record.level() == Level::Error {
@@ -104,7 +111,7 @@ pub fn init() -> Result<(), log::SetLoggerError> {
         palette
     });
     if let Some(palette) = palette {
-        let mut screen = KERNEL_TEXT_SCREEN.lock();
+        let mut screen = KERNEL_TEXT_SCREEN.lock().unwrap();
         screen.set_palette(palette);
         screen.set_active(true);
     }
@@ -113,5 +120,7 @@ pub fn init() -> Result<(), log::SetLoggerError> {
 }
 
 pub fn show_kernel_screen(show: bool) {
-    KERNEL_TEXT_SCREEN.lock().set_active(show);
+    if let Ok(mut screen) = KERNEL_TEXT_SCREEN.lock() {
+        screen.set_active(show);
+    }
 }
