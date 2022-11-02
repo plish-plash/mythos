@@ -1,4 +1,5 @@
 use crate::graphics::*;
+use kernel_common::Color;
 
 pub trait Screen {
     fn set_active(&mut self, active: bool);
@@ -55,6 +56,13 @@ impl TextScreen {
     }
     pub fn set_palette(&mut self, palette: Palette) {
         self.palette = palette;
+    }
+
+    pub fn new(palette: Palette) -> TextScreen {
+        TextScreen {
+            palette,
+            ..Self::kernel_new()
+        }
     }
 
     fn index(x: usize, y: usize) -> usize {
@@ -136,4 +144,60 @@ impl Screen for TextScreen {
     }
 }
 
-pub struct ImageScreen {}
+pub struct ImageScreen {
+    active: bool,
+    data: [Color; Self::WIDTH * Self::HEIGHT],
+}
+
+impl ImageScreen {
+    pub const WIDTH: usize = 640;
+    pub const HEIGHT: usize = 480;
+
+    pub fn new(fill_color: Color) -> ImageScreen {
+        ImageScreen {
+            active: false,
+            data: [fill_color; Self::WIDTH * Self::HEIGHT],
+        }
+    }
+
+    fn index(x: usize, y: usize) -> usize {
+        x + (y * Self::WIDTH)
+    }
+    pub fn set_pixel(&mut self, x: usize, y: usize, color: Color) {
+        let idx = Self::index(x, y);
+        if self.data[idx] != color {
+            self.data[idx] = color;
+            if self.active {
+                if let Some(mut fb) = get_global_framebuffer() {
+                    self.draw_pixel(&mut fb, x, y, idx);
+                }
+            }
+        }
+    }
+    fn draw_pixel(&self, fb: &mut FrameBuffer, x: usize, y: usize, idx: usize) {
+        let color = self.data[idx].to_tuple();
+        fb.put_pixel(x, y, fb.pack_color(color.0, color.1, color.2));
+    }
+}
+
+impl Screen for ImageScreen {
+    fn set_active(&mut self, active: bool) {
+        if self.active != active {
+            self.active = active;
+            if active {
+                self.draw_full();
+            }
+        }
+    }
+    fn draw_full(&self) {
+        if let Some(mut fb) = get_global_framebuffer() {
+            let mut idx = 0;
+            for y in 0..Self::HEIGHT {
+                for x in 0..Self::WIDTH {
+                    self.draw_pixel(&mut fb, x, y, idx);
+                    idx += 1;
+                }
+            }
+        }
+    }
+}

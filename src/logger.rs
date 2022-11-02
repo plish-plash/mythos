@@ -112,6 +112,6 @@ pub fn init() -> Result<(), log::SetLoggerError> {
     log::set_logger(&LOGGER).map(|()| log::set_max_level(log::LevelFilter::Trace))
 }
 
-pub fn show_kernel_screen() {
-    KERNEL_TEXT_SCREEN.lock().set_active(true);
+pub fn show_kernel_screen(show: bool) {
+    KERNEL_TEXT_SCREEN.lock().set_active(show);
 }

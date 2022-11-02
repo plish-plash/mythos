@@ -83,14 +83,15 @@ impl VirtMemRange {
 }
 
 // TODO secure against stack overflows
+// TODO allow heaps to map more memory as needed
 const EXECUTION_MEMORY_START: u64 = 0xc000_0000_0000;
-pub const KERNEL_STACK_MEMORY: VirtMemRange = VirtMemRange::new(EXECUTION_MEMORY_START, 40 * 1024);
+pub const KERNEL_STACK_MEMORY: VirtMemRange = VirtMemRange::new(EXECUTION_MEMORY_START, 8 * 1024);
 pub const KERNEL_HEAP_MEMORY: VirtMemRange =
-    VirtMemRange::new(KERNEL_STACK_MEMORY.end_u64(), 512 * 1024);
+    VirtMemRange::new(KERNEL_STACK_MEMORY.end_u64(), 8 * 1024 * 1024);
 pub const USER_STACK_MEMORY: VirtMemRange =
-    VirtMemRange::new(KERNEL_HEAP_MEMORY.end_u64(), 80 * 1024);
+    VirtMemRange::new(KERNEL_HEAP_MEMORY.end_u64(), 512 * 1024);
 pub const USER_HEAP_MEMORY: VirtMemRange =
-    VirtMemRange::new(USER_STACK_MEMORY.end_u64(), 512 * 1024);
+    VirtMemRange::new(USER_STACK_MEMORY.end_u64(), 1024 * 1024);
 
 pub trait MemoryMapper {
     fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>>;

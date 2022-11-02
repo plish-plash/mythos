@@ -3,6 +3,8 @@
 #![no_std]
 extern crate alloc;
 
+pub mod screen;
+
 pub use alloc::*;
 pub use core::*;
 
@@ -10,7 +12,13 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::arch::asm;
 use kernel_common::*;
 
-fn syscall(id: Syscall, arg_base: u64, arg_len: u64) -> Result<u64, UserError> {
+pub type SystemError = UserError;
+
+fn pack_u32s(a: u64, b: u64) -> u64 {
+    ((a & u32::MAX as u64) << 32) | (b & u32::MAX as u64)
+}
+
+fn syscall(id: Syscall, arg_base: u64, arg_len: u64) -> Result<u64, SystemError> {
     unsafe {
         let id: u64 = mem::transmute(id);
         let result: u64;
@@ -22,7 +30,7 @@ fn syscall(id: Syscall, arg_base: u64, arg_len: u64) -> Result<u64, UserError> {
             out("rax") result,
             clobber_abi("sysv64"),
         );
-        UserError::unpack(result)
+        SystemError::unpack(result)
     }
 }
 
@@ -61,17 +69,13 @@ pub fn exit() {
     syscall(Syscall::ProgramExit, 0, 0).unwrap_or_default();
 }
 
-pub fn test_syscall() {
-    syscall(Syscall::InfoOsName, 0, 0).unwrap();
-}
-
 struct SystemAllocator;
 
 #[global_allocator]
 static ALLOCATOR: SystemAllocator = SystemAllocator;
 
 fn pack_layout(layout: Layout) -> u64 {
-    ((layout.align() as u64 & u32::MAX as u64) << 32) | (layout.size() as u64 & u32::MAX as u64)
+    pack_u32s(layout.align() as u64, layout.size() as u64)
 }
 
 unsafe impl GlobalAlloc for SystemAllocator {

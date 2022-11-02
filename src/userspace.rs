@@ -108,12 +108,21 @@ pub fn restore_userspace(user_stack: u64) -> ! {
     }
 }
 
+fn unpack_bool(arg: u64) -> Result<bool, UserError> {
+    match arg {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(UserError::InvalidValue),
+    }
+}
+
+fn unpack_u32s(arg: u64) -> (u64, u64) {
+    (((arg >> 32) & u32::MAX as u64), (arg & u32::MAX as u64))
+}
+
 fn unpack_layout(arg: u64) -> core::alloc::Layout {
-    core::alloc::Layout::from_size_align(
-        (arg & u32::MAX as u64) as usize,
-        ((arg >> 32) & u32::MAX as u64) as usize,
-    )
-    .unwrap()
+    let (align, size) = unpack_u32s(arg);
+    core::alloc::Layout::from_size_align(size as usize, align as usize).unwrap()
 }
 
 #[no_mangle]
@@ -123,26 +132,27 @@ extern "sysv64" fn _syscall_handler(
     arg_len: u64,
     user_stack: u64,
 ) -> u64 {
-    let mut result = Ok(0);
-    match id {
+    let result = match id {
         Syscall::InfoOsName => {
             // TODO
             log::info!("Hello from userspace!");
+            Ok(0)
         }
         Syscall::InfoOsVersion => unimplemented!(),
         Syscall::MemAlloc => program::with_current_program_allocator(|alloc| {
             let layout = unpack_layout(arg_len);
-            result = unsafe { Ok(alloc.alloc(layout) as u64) };
+            unsafe { Ok(alloc.alloc(layout) as u64) }
         }),
         Syscall::MemDealloc => program::with_current_program_allocator(|alloc| {
             let layout = unpack_layout(arg_len);
             unsafe {
                 alloc.dealloc(arg_base as *mut u8, layout);
             }
+            Ok(0)
         }),
         Syscall::MemAllocZeroed => program::with_current_program_allocator(|alloc| {
             let layout = unpack_layout(arg_len);
-            result = unsafe { Ok(alloc.alloc_zeroed(layout) as u64) };
+            unsafe { Ok(alloc.alloc_zeroed(layout) as u64) }
         }),
         Syscall::MemRealloc => unimplemented!(),
         Syscall::ProgramExit => program::current_program_exit(),
@@ -151,12 +161,25 @@ extern "sysv64" fn _syscall_handler(
                 unsafe { core::slice::from_raw_parts(arg_base as *const u8, arg_len as usize) };
             let info = core::str::from_utf8(info).unwrap();
             log::warn!("Program aborted: {}", info);
-            crate::logger::show_kernel_screen();
+            crate::logger::show_kernel_screen(true);
             program::current_program_exit();
         }
         Syscall::ProgramLoad => unimplemented!(),
-        Syscall::ScreenCreate => unimplemented!(),
-    }
+        Syscall::ScreenCreate => unpack_bool(arg_base)
+            .and_then(|arg| program::create_screen(arg))
+            .map(|_| 0),
+        Syscall::ScreenSetChar => {
+            let (x, y) = unpack_u32s(arg_base);
+            let bytes = arg_len.to_ne_bytes();
+            program::set_screen_char(x as usize, y as usize, bytes[0], bytes[1]).map(|_| 0)
+        }
+        Syscall::ScreenSetPixel => {
+            let (x, y) = unpack_u32s(arg_base);
+            let bytes = arg_len.to_ne_bytes();
+            program::set_screen_pixel(x as usize, y as usize, bytes[0], bytes[1], bytes[2])
+                .map(|_| 0)
+        }
+    };
     UserError::pack(result)
 }
 
