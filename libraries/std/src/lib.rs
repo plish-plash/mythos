@@ -27,23 +27,25 @@ macro_rules! entry_point {
     };
 }
 
-fn pack_u32s(a: u64, b: u64) -> u64 {
-    ((a & u32::MAX as u64) << 32) | (b & u32::MAX as u64)
-}
-
-fn syscall(id: Syscall, arg_base: u64, arg_len: u64) -> Result<u64, SystemError> {
+fn syscall(id: Syscall, arg_base: u64, arg_len: u64) -> Result<(u64, u64), SystemError> {
     unsafe {
         let id: u64 = mem::transmute(id);
-        let result: u64;
+        let ret0: u64;
+        let ret1: u64;
         asm!(
             "syscall",
             in("rdi") id,
             in("rsi") arg_base,
             in("rdx") arg_len,
-            out("rax") result,
+            lateout("rax") ret0,
+            lateout("rdx") ret1,
             clobber_abi("sysv64"),
         );
-        SystemError::unpack(result)
+        if ret0 == 0 {
+            Err(mem::transmute(ret1))
+        } else {
+            Ok((ret0, ret1))
+        }
     }
 }
 
@@ -70,19 +72,17 @@ struct SystemAllocator;
 #[global_allocator]
 static ALLOCATOR: SystemAllocator = SystemAllocator;
 
-fn pack_layout(layout: Layout) -> u64 {
-    pack_u32s(layout.align() as u64, layout.size() as u64)
-}
-
 unsafe impl GlobalAlloc for SystemAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        syscall(Syscall::MemAlloc, 0, pack_layout(layout)).unwrap() as *mut u8
+        syscall(Syscall::MemAlloc, 0, layout.pack_u64()).unwrap().1 as *mut u8
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        syscall(Syscall::MemDealloc, ptr as u64, pack_layout(layout)).unwrap();
+        syscall(Syscall::MemDealloc, ptr as u64, layout.pack_u64()).unwrap();
     }
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        syscall(Syscall::MemAllocZeroed, 0, pack_layout(layout)).unwrap() as *mut u8
+        syscall(Syscall::MemAllocZeroed, 0, layout.pack_u64())
+            .unwrap()
+            .1 as *mut u8
     }
     // unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
     //     syscall(Syscall::MemRealloc, ptr as u64, pack_layout(layout)).unwrap() as *mut u8

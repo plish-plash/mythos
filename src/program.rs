@@ -203,7 +203,7 @@ pub fn set_screen_char(x: usize, y: usize, ch: u8, color: u8) -> Result<(), User
     }
 }
 
-pub fn set_screen_pixel(x: usize, y: usize, r: u8, g: u8, b: u8) -> Result<(), UserError> {
+pub fn set_screen_pixel(x: usize, y: usize, color: Color) -> Result<(), UserError> {
     let program_stack = PROGRAM_STACK.lock().unwrap();
     let current_program = program_stack.last().unwrap();
     if !current_program.has_screen {
@@ -213,7 +213,7 @@ pub fn set_screen_pixel(x: usize, y: usize, r: u8, g: u8, b: u8) -> Result<(), U
     match screen_stack.last_mut().unwrap() {
         Screen::Text(_) => Err(UserError::ScreenWrongType),
         Screen::Image(screen) => {
-            screen.set_pixel(x, y, Color::new(r, g, b));
+            screen.set_pixel(x, y, color);
             Ok(())
         }
     }

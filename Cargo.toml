@@ -4,7 +4,6 @@ members = [
     "drivers/ata",
     "libraries/kernel-common",
     "libraries/mbr",
-    "libraries/pack-u64",
     "libraries/std",
     "libraries/uniquelock",
     "programs/raytrace",
