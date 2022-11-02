@@ -1,5 +1,5 @@
 use crate::{elf_loader, filesystem::get_filesystem, memory::*, screen::*, userspace};
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use core::alloc::GlobalAlloc;
 use fat32::dir::DirError;
 use kernel_common::{Color, UserError};
@@ -39,8 +39,8 @@ impl UserProgram {
 }
 
 enum Screen {
-    Text(TextScreen),
-    Image(ImageScreen),
+    Text(Box<TextScreen>),
+    Image(Box<ImageScreen>),
 }
 
 impl Screen {
@@ -162,27 +162,15 @@ fn push_screen(screen: Screen) -> Result<(), UserError> {
     Ok(())
 }
 
-fn pop_screen() -> Result<(), UserError> {
-    let mut program_stack = PROGRAM_STACK.lock().unwrap();
-    let current_program = program_stack.last_mut().unwrap();
-    if !current_program.has_screen {
-        return Err(UserError::MissingScreen);
-    }
-    current_program.has_screen = false;
-    SCREEN_STACK.lock().unwrap().pop();
-    set_screen_active(true);
-    Ok(())
-}
-
 fn make_user_text_palette() -> Palette {
     unimplemented!(); // TODO
 }
 
 pub fn create_screen(image: bool) -> Result<(), UserError> {
     let screen = if image {
-        Screen::Image(ImageScreen::new(Color::BLACK))
+        Screen::Image(Box::new(ImageScreen::new(Color::BLACK)))
     } else {
-        Screen::Text(TextScreen::new(make_user_text_palette()))
+        Screen::Text(Box::new(TextScreen::new(make_user_text_palette())))
     };
     push_screen(screen)
 }

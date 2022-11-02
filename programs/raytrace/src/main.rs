@@ -8,11 +8,10 @@ entry_point!(main);
 fn main() {
     screen::create(true).unwrap();
     for y in 0..480 {
+        let t = y as f32 / 480.0;
         for x in 0..640 {
-            let r = if y % 3 == 0 { 255 } else { 0 };
-            let g = if y % 3 == 1 { 255 } else { 0 };
-            let b = if y % 3 == 2 { 255 } else { 0 };
-            screen::set_pixel(x, y, screen::Color::new(r, g, b)).unwrap();
+            let col = (t * 255.0) as u8;
+            screen::set_pixel(x, y, screen::Color::new(col, col, 255)).unwrap();
         }
     }
     wait_for_confirm();
