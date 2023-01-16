@@ -16,7 +16,7 @@ use xmas_elf::{
     ElfFile,
 };
 
-pub use bootloader::boot_info::TlsTemplate;
+pub use bootloader_api::info::TlsTemplate;
 
 /// Used by [`Inner::make_mut`] and [`Inner::clean_copied_flag`].
 const COPIED: Flags = Flags::BIT_9;

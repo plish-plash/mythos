@@ -1,5 +1,5 @@
 use alloc::collections::BTreeMap;
-use bootloader::boot_info::{MemoryRegionKind, MemoryRegions};
+use bootloader_api::info::{MemoryRegionKind, MemoryRegions};
 use linked_list_allocator::LockedHeap;
 use uniquelock::{UniqueGuard, UniqueLock, UniqueOnce};
 use x86_64::{

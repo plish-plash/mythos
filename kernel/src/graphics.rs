@@ -1,4 +1,4 @@
-use bootloader::boot_info::{self, PixelFormat};
+use bootloader_api::info::{self as boot_info, PixelFormat};
 use uniquelock::{UniqueGuard, UniqueLock, UniqueOnce};
 
 pub struct FontData<'a> {
@@ -12,11 +12,12 @@ pub struct FrameBuffer(&'static mut boot_info::FrameBuffer);
 impl FrameBuffer {
     #[inline(always)]
     fn set_pixel_color(&mut self, idx: usize, color: u32) {
-        let idx = idx * self.0.info().bytes_per_pixel;
+        let bpp = self.0.info().bytes_per_pixel;
         let buffer = self.0.buffer_mut();
-        let buffer = &mut buffer[idx] as *mut u8 as *mut u32;
+        let dst = &mut buffer[idx * bpp] as *mut u8;
+        let src = &color as *const u32 as *const u8;
         unsafe {
-            *buffer = color;
+            core::ptr::copy_nonoverlapping(src, dst, bpp);
         }
     }
 
@@ -25,8 +26,8 @@ impl FrameBuffer {
     }
     pub fn pack_color(&self, r: u8, g: u8, b: u8) -> u32 {
         match self.0.info().pixel_format {
-            PixelFormat::RGB => (r as u32) | ((g as u32) << 8) | ((b as u32) << 16),
-            PixelFormat::BGR => (b as u32) | ((g as u32) << 8) | ((r as u32) << 16),
+            PixelFormat::Rgb => (r as u32) | ((g as u32) << 8) | ((b as u32) << 16),
+            PixelFormat::Bgr => (b as u32) | ((g as u32) << 8) | ((r as u32) << 16),
             PixelFormat::U8 => r as u32,
             _ => unimplemented!(),
         }
@@ -99,7 +100,6 @@ static GLOBAL_FRAMEBUFFER: UniqueOnce<UniqueLock<FrameBuffer>> = UniqueOnce::new
 pub fn set_global_framebuffer(framebuffer: &'static mut boot_info::FrameBuffer) {
     GLOBAL_FRAMEBUFFER
         .call_once(|| {
-            assert_eq!(framebuffer.info().bytes_per_pixel, 4);
             UniqueLock::new("framebuffer", FrameBuffer(framebuffer))
         })
         .expect("set_global_framebuffer called twice");

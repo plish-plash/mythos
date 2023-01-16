@@ -1,6 +1,6 @@
-# GenOS
+# MariOS
 
-A simple, pure-Rust operating system for experimenting with procedural generation.
+A toy operating system that is controlled by playing Super Mario Bros. Written entirely in Rust.
 
 Relies heavily on the [`bootloader`](https://github.com/rust-osdev/bootloader) crate to setup the environment.
 
@@ -18,8 +18,8 @@ Relies heavily on the [`bootloader`](https://github.com/rust-osdev/bootloader) c
 
 ## Structure
 
-- Root crate is the kernel.
-- `os-runner` is a binary that combines the bootloader, the kernel, and the user partition to create a bootable disk image.
+- Root crate is a binary that combines the bootloader, the kernel, and the user partition to create a bootable disk image.
+- `kernel` is the OS itself.
 - `drivers` contain libraries used by the kernel for interfacing with hardware.
 - `libraries` contain other libraries, notably a custom std for userspace.
 - `programs` contains userspace programs.
@@ -27,6 +27,4 @@ Relies heavily on the [`bootloader`](https://github.com/rust-osdev/bootloader) c
 ## Build Commands
 
 - Run **`./programs/build_user_partition.sh`** to build the programs and create a user partition (requires mtools).
-- To build the kernel, run **`cargo kbuild`**.
-- To create a bootable disk image with the kernel and user data, run **`cargo kimage`**. This will invoke the `os-runner` sub-crate to create the disk image.
-- To create the disk image and run the OS in QEMU, run **`cargo krun`**.
+- Run **`cargo build`** to create a bootable disk image, and **`cargo run`** to run it in QEMU.

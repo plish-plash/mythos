@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "os-runner",
+    "kernel",
     "drivers/ata",
     "libraries/kernel-common",
     "libraries/mbr",
@@ -10,31 +10,18 @@ members = [
 ]
 
 [package]
-name = "genos"
+name = "marios"
 version = "0.1.0"
 edition = "2021"
-
-[package.metadata.bootloader]
-map-physical-memory = true
-dynamic-range-start = 0xd000_0000_0000
-physical-memory-offset = 0xf000_0000_0000
 
 [profile.release]
 strip = true
 lto = false
 
+[build-dependencies]
+bootloader = "0.11"
+kernel = { path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
+
 [dependencies]
-log = "*"
-bootloader = "0.10"
-x86_64 = "0.14"
-pic8259 = "0.10"
-pc-keyboard = "0.6"
-xmas-elf = "0.8"
-fat32 = "0.2"
-
-linked_list_allocator = "0.10"
-
-ata = { path = "drivers/ata" }
-kernel-common = { path = "libraries/kernel-common" }
-mbr = { path = "libraries/mbr" }
-uniquelock = { path = "libraries/uniquelock" }
+# used for UEFI booting in QEMU
+# ovmf-prebuilt = "0.1.0-alpha.1"
