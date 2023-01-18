@@ -260,7 +260,7 @@ static MEMORY_MAPPER: UniqueOnce<UniqueLock<KernelMemoryMapper>> = UniqueOnce::n
 pub fn init_memory(phys_offset: u64, memory_regions: &'static MemoryRegions) {
     // Get physical memory offset.
     let phys_offset = VirtAddr::new(phys_offset);
-    log::debug!("Physical memory  addr:{:#X}", phys_offset);
+    // log::debug!("Physical memory  addr:{:#X}", phys_offset);
 
     // Create kernel mapper and map kernel heap and interrupt stack.
     MEMORY_MAPPER
@@ -279,18 +279,18 @@ pub fn init_memory(phys_offset: u64, memory_regions: &'static MemoryRegions) {
     }
 
     // Allocation (Box::new, etc.) is working at this point. Print some numbers.
-    log::debug!(
-        "Execution memory addr:{:#X}",
-        VirtAddr::new(EXECUTION_MEMORY_START)
-    );
-    log::debug!(
-        "  kernel stack size:{}KiB\n  kernel heap  size:{}KiB",
-        KERNEL_STACK_MEMORY.size_kib(),
-        KERNEL_HEAP_MEMORY.size_kib()
-    );
-    log::debug!(
-        "  user stack size:{}KiB\n  user heap  size:{}KiB",
-        USER_STACK_MEMORY.size_kib(),
-        USER_HEAP_MEMORY.size_kib()
-    );
+    // log::debug!(
+    //     "Execution memory addr:{:#X}",
+    //     VirtAddr::new(EXECUTION_MEMORY_START)
+    // );
+    // log::debug!(
+    //     "  kernel stack size:{}KiB\n  kernel heap  size:{}KiB",
+    //     KERNEL_STACK_MEMORY.size_kib(),
+    //     KERNEL_HEAP_MEMORY.size_kib()
+    // );
+    // log::debug!(
+    //     "  user stack size:{}KiB\n  user heap  size:{}KiB",
+    //     USER_STACK_MEMORY.size_kib(),
+    //     USER_HEAP_MEMORY.size_kib()
+    // );
 }

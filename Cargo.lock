@@ -18,6 +18,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2cb2f989d18dd141ab8ae82f64d1a8cdd37e0840f73a406896cf5e99502fab61"
 
 [[package]]
+name = "arrayvec"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
+
+[[package]]
 name = "ata"
 version = "0.1.0"
 dependencies = [
@@ -315,8 +321,8 @@ dependencies = [
  "bootloader_api",
  "fat32",
  "kernel-common",
+ "level",
  "linked_list_allocator",
- "log",
  "mbr",
  "pc-keyboard",
  "pic8259",
@@ -328,6 +334,13 @@ dependencies = [
 [[package]]
 name = "kernel-common"
 version = "0.1.0"
+
+[[package]]
+name = "level"
+version = "0.1.0"
+dependencies = [
+ "tar-no-std",
+]
 
 [[package]]
 name = "libc"
@@ -571,6 +584,17 @@ name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
+
+[[package]]
+name = "tar-no-std"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "daa2b7e1951821da66cec610e8037658bfcf9ad2bfd0b5287270c02a5fe4efb4"
+dependencies = [
+ "arrayvec",
+ "bitflags",
+ "log",
+]
 
 [[package]]
 name = "tempfile"

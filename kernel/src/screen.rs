@@ -30,12 +30,6 @@ impl Palette {
 
 const COLOR_BLACK: u32 = 0;
 
-static TEXT_SCREEN_FONT: FontData = FontData {
-    buffer: include_bytes!("font.data"),
-    width: 128,
-    char_size: (7, 9),
-};
-
 pub struct TextScreen {
     active: bool,
     palette: Palette,
@@ -43,7 +37,6 @@ pub struct TextScreen {
 }
 
 impl TextScreen {
-    const FONT_SCALE: usize = 2;
     pub const WIDTH: usize = 45;
     pub const HEIGHT: usize = 26;
 

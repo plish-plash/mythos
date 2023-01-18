@@ -1,7 +1,10 @@
+use core::fmt::Write;
 use pc_keyboard::{layouts, DecodedKey, HandleControl, Keyboard, ScancodeSet1};
 use pic8259::ChainedPics;
 use uniquelock::{Spinlock, UniqueLock};
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
+
+use crate::fatal_error;
 
 static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();
 
@@ -126,7 +129,7 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
         }
     }
     if confirm {
-        crate::program::current_program_notify();
+        // crate::program::current_program_notify();
     }
     InterruptIndex::Keyboard.end_interrupt();
 }
@@ -137,96 +140,63 @@ extern "x86-interrupt" fn secondary_ata_interrupt_handler(_stack_frame: Interrup
     InterruptIndex::SecondaryAta.end_interrupt();
 }
 
-fn log_exception_stack_frame(stack_frame: InterruptStackFrame) {
-    log::debug!("  at {:#X}", stack_frame.instruction_pointer);
-    log::debug!("  stack {:#X}", stack_frame.stack_pointer);
+extern "x86-interrupt" fn divide_error_handler(_stack_frame: InterruptStackFrame) {
+    fatal_error!("EXCEPTION: {}", "DIVIDE BY 0");
 }
-
-extern "x86-interrupt" fn divide_error_handler(stack_frame: InterruptStackFrame) {
-    log::error!("EXCEPTION: {}", "DIVIDE BY 0");
-    log_exception_stack_frame(stack_frame);
+extern "x86-interrupt" fn breakpoint_handler(_stack_frame: InterruptStackFrame) {
+    fatal_error!("EXCEPTION: {}", "BREAKPOINT");
 }
-extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
-    log::error!("EXCEPTION: {}", "BREAKPOINT");
-    log_exception_stack_frame(stack_frame);
+extern "x86-interrupt" fn overflow_handler(_stack_frame: InterruptStackFrame) {
+    fatal_error!("EXCEPTION: {}", "OVERFLOW");
 }
-extern "x86-interrupt" fn overflow_handler(stack_frame: InterruptStackFrame) {
-    log::error!("EXCEPTION: {}", "OVERFLOW");
-    log_exception_stack_frame(stack_frame);
+extern "x86-interrupt" fn bound_range_exceeded_handler(_stack_frame: InterruptStackFrame) {
+    fatal_error!("EXCEPTION: {}", "BOUND RANGE EXCEEDED");
 }
-extern "x86-interrupt" fn bound_range_exceeded_handler(stack_frame: InterruptStackFrame) {
-    log::error!("EXCEPTION: {}", "BOUND RANGE EXCEEDED");
-    log_exception_stack_frame(stack_frame);
+extern "x86-interrupt" fn invalid_opcode_handler(_stack_frame: InterruptStackFrame) {
+    fatal_error!("EXCEPTION: {}", "INVALID OPCODE");
 }
-extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStackFrame) {
-    log::error!("EXCEPTION: {}", "INVALID OPCODE");
-    log_exception_stack_frame(stack_frame);
-    crate::hlt_loop();
-}
-extern "x86-interrupt" fn device_not_available_handler(stack_frame: InterruptStackFrame) {
-    log::error!("EXCEPTION: {}", "DEVICE NOT AVAILABLE");
-    log_exception_stack_frame(stack_frame);
+extern "x86-interrupt" fn device_not_available_handler(_stack_frame: InterruptStackFrame) {
+    fatal_error!("EXCEPTION: {}", "DEVICE NOT AVAILABLE");
 }
 extern "x86-interrupt" fn double_fault_handler(
-    stack_frame: InterruptStackFrame,
+    _stack_frame: InterruptStackFrame,
     _error_code: u64,
 ) -> ! {
-    log::error!("EXCEPTION: {}", "DOUBLE FAULT");
-    log_exception_stack_frame(stack_frame);
-    crate::hlt_loop();
+    fatal_error!("EXCEPTION: {}", "DOUBLE FAULT");
 }
-extern "x86-interrupt" fn invalid_tss_handler(stack_frame: InterruptStackFrame, error_code: u64) {
-    log::error!("EXCEPTION: {}({})", "INVALID TSS", error_code);
-    log_exception_stack_frame(stack_frame);
+extern "x86-interrupt" fn invalid_tss_handler(_stack_frame: InterruptStackFrame, error_code: u64) {
+    fatal_error!("EXCEPTION: {}({})", "INVALID TSS", error_code);
 }
 extern "x86-interrupt" fn segment_not_present_handler(
-    stack_frame: InterruptStackFrame,
+    _stack_frame: InterruptStackFrame,
     error_code: u64,
 ) {
-    log::error!("EXCEPTION: {}({})", "SEGMENT NOT PRESENT", error_code);
-    log_exception_stack_frame(stack_frame);
+    fatal_error!("EXCEPTION: {}({})", "SEGMENT NOT PRESENT", error_code);
 }
 extern "x86-interrupt" fn stack_segment_fault_handler(
-    stack_frame: InterruptStackFrame,
+    _stack_frame: InterruptStackFrame,
     error_code: u64,
 ) {
-    log::error!("EXCEPTION: {}({})", "STACK SEGMENT FAULT", error_code);
-    log_exception_stack_frame(stack_frame);
+    fatal_error!("EXCEPTION: {}({})", "STACK SEGMENT FAULT", error_code);
 }
 extern "x86-interrupt" fn general_protection_fault_handler(
-    stack_frame: InterruptStackFrame,
+    _stack_frame: InterruptStackFrame,
     error_code: u64,
 ) {
-    log::error!("EXCEPTION: {}({})", "GENERAL PROTECTION FAULT", error_code);
-    log_exception_stack_frame(stack_frame);
-    crate::hlt_loop();
+    fatal_error!("EXCEPTION: {}({})", "GENERAL PROTECTION FAULT", error_code);
 }
 extern "x86-interrupt" fn page_fault_handler(
-    stack_frame: InterruptStackFrame,
+    _stack_frame: InterruptStackFrame,
     error_code: PageFaultErrorCode,
 ) {
-    let addr = x86_64::registers::control::Cr2::read();
-    log::error!("EXCEPTION: {}({:b})", "PAGE FAULT", error_code.bits());
-    log_exception_stack_frame(stack_frame);
-    log::debug!(
-        "  {} {:#X}",
-        if error_code.contains(PageFaultErrorCode::CAUSED_BY_WRITE) {
-            "write"
-        } else {
-            "read"
-        },
-        addr
-    );
-    crate::hlt_loop();
+    fatal_error!("EXCEPTION: {}({:b})", "PAGE FAULT", error_code.bits());
 }
 extern "x86-interrupt" fn alignment_check_handler(
-    stack_frame: InterruptStackFrame,
+    _stack_frame: InterruptStackFrame,
     _error_code: u64,
 ) {
-    log::error!("EXCEPTION: {}", "ALIGNMENT CHECK");
-    log_exception_stack_frame(stack_frame);
+    fatal_error!("EXCEPTION: {}", "ALIGNMENT CHECK");
 }
-extern "x86-interrupt" fn simd_floating_point_handler(stack_frame: InterruptStackFrame) {
-    log::error!("EXCEPTION: {}", "SIMD FLOATING POINT");
-    log_exception_stack_frame(stack_frame);
+extern "x86-interrupt" fn simd_floating_point_handler(_stack_frame: InterruptStackFrame) {
+    fatal_error!("EXCEPTION: {}", "SIMD FLOATING POINT");
 }

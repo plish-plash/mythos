@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-log = "*"
 bootloader_api = "0.11"
 x86_64 = "0.14"
 pic8259 = "0.10"
@@ -18,3 +17,4 @@ ata = { path = "../drivers/ata" }
 kernel-common = { path = "../libraries/kernel-common" }
 mbr = { path = "../libraries/mbr" }
 uniquelock = { path = "../libraries/uniquelock" }
+level = { path = "../libraries/level" }

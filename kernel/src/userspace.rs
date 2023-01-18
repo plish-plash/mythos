@@ -1,5 +1,5 @@
-use crate::{memory, program};
-use core::{alloc::Layout, arch::asm};
+use crate::memory;
+use core::arch::asm;
 use kernel_common::*;
 use uniquelock::UniqueOnce;
 use x86_64::{
@@ -121,23 +121,24 @@ extern "sysv64" fn _syscall_handler(
     arg_len: u64,
     user_stack: u64,
 ) -> SyscallRetValue {
-    match id {
-        Syscall::InfoOsName => syscall_info_os_name(arg_base, arg_len).into(),
-        Syscall::InfoOsVersion => syscall_info_os_version(arg_base, arg_len).into(),
-        Syscall::MemAlloc => syscall_mem_alloc(arg_base, arg_len).into(),
-        Syscall::MemDealloc => syscall_mem_dealloc(arg_base, arg_len).into(),
-        Syscall::MemAllocZeroed => syscall_mem_alloc_zeroed(arg_base, arg_len).into(),
-        Syscall::MemRealloc => syscall_mem_realloc(arg_base, arg_len).into(),
-        Syscall::ProgramExit => syscall_program_exit(arg_base, arg_len),
-        Syscall::ProgramPanic => syscall_program_panic(arg_base, arg_len),
-        Syscall::ProgramLoad => syscall_program_load(arg_base, arg_len, user_stack),
-        Syscall::ProgramWaitForConfirm => {
-            syscall_program_wait_for_confirm(arg_base, arg_len).into()
-        }
-        Syscall::ScreenCreate => syscall_screen_create(arg_base, arg_len).into(),
-        Syscall::ScreenSetChar => syscall_screen_set_char(arg_base, arg_len).into(),
-        Syscall::ScreenSetPixel => syscall_screen_set_pixel(arg_base, arg_len).into(),
-    }
+    // match id {
+    //     Syscall::InfoOsName => syscall_info_os_name(arg_base, arg_len).into(),
+    //     Syscall::InfoOsVersion => syscall_info_os_version(arg_base, arg_len).into(),
+    //     Syscall::MemAlloc => syscall_mem_alloc(arg_base, arg_len).into(),
+    //     Syscall::MemDealloc => syscall_mem_dealloc(arg_base, arg_len).into(),
+    //     Syscall::MemAllocZeroed => syscall_mem_alloc_zeroed(arg_base, arg_len).into(),
+    //     Syscall::MemRealloc => syscall_mem_realloc(arg_base, arg_len).into(),
+    //     Syscall::ProgramExit => syscall_program_exit(arg_base, arg_len),
+    //     Syscall::ProgramPanic => syscall_program_panic(arg_base, arg_len),
+    //     Syscall::ProgramLoad => syscall_program_load(arg_base, arg_len, user_stack),
+    //     Syscall::ProgramWaitForConfirm => {
+    //         syscall_program_wait_for_confirm(arg_base, arg_len).into()
+    //     }
+    //     Syscall::ScreenCreate => syscall_screen_create(arg_base, arg_len).into(),
+    //     Syscall::ScreenSetChar => syscall_screen_set_char(arg_base, arg_len).into(),
+    //     Syscall::ScreenSetPixel => syscall_screen_set_pixel(arg_base, arg_len).into(),
+    // }
+    unimplemented!("syscall");
 }
 
 #[naked]
@@ -152,74 +153,74 @@ unsafe extern "sysv64" fn syscall() -> ! {
     )
 }
 
-fn syscall_info_os_name(_arg_base: u64, _arg_len: u64) -> Result<(), UserError> {
-    // TODO
-    log::info!("Hello from userspace!");
-    Ok(())
-}
-
-fn syscall_info_os_version(_arg_base: u64, _arg_len: u64) -> Result<(), UserError> {
-    unimplemented!();
-}
-
-fn syscall_mem_alloc(_arg_base: u64, arg_len: u64) -> Result<u64, UserError> {
-    let layout = Layout::unpack_u64(arg_len)?;
-    Ok(program::with_current_program_allocator(|alloc| unsafe { alloc.alloc(layout) }) as u64)
-}
-
-fn syscall_mem_dealloc(arg_base: u64, arg_len: u64) -> Result<(), UserError> {
-    let ptr = arg_base as *mut u8;
-    let layout = Layout::unpack_u64(arg_len)?;
-    program::with_current_program_allocator(|alloc| unsafe { alloc.dealloc(ptr, layout) });
-    Ok(())
-}
-
-fn syscall_mem_alloc_zeroed(_arg_base: u64, arg_len: u64) -> Result<u64, UserError> {
-    let layout = Layout::unpack_u64(arg_len)?;
-    Ok(
-        program::with_current_program_allocator(|alloc| unsafe { alloc.alloc_zeroed(layout) })
-            as u64,
-    )
-}
-
-fn syscall_mem_realloc(_arg_base: u64, _arg_len: u64) -> Result<(), UserError> {
-    unimplemented!();
-}
-
-fn syscall_program_exit(_arg_base: u64, _arg_len: u64) -> ! {
-    program::current_program_exit();
-}
-
-fn syscall_program_panic(arg_base: u64, arg_len: u64) -> ! {
-    let info = unsafe { core::slice::from_raw_parts(arg_base as *const u8, arg_len as usize) };
-    let info = core::str::from_utf8(info).unwrap();
-    log::warn!("Program aborted: {}", info);
-    program::current_program_exit();
-}
-
-fn syscall_program_load(_arg_base: u64, _arg_len: u64, user_stack: u64) -> ! {
-    program::save_current_user_stack(user_stack);
-    unimplemented!();
-}
-
-fn syscall_program_wait_for_confirm(_arg_base: u64, _arg_len: u64) -> Result<(), UserError> {
-    program::current_program_wait();
-    Ok(())
-}
-
-fn syscall_screen_create(arg_base: u64, _arg_len: u64) -> Result<(), UserError> {
-    let arg = bool::unpack_u64(arg_base)?;
-    program::create_screen(arg)
-}
-
-fn syscall_screen_set_char(arg_base: u64, arg_len: u64) -> Result<(), UserError> {
-    let (x, y) = <(u32, u32)>::unpack_u64(arg_base)?;
-    let (ch, color) = <(u32, u32)>::unpack_u64(arg_len)?;
-    program::set_screen_char(x as usize, y as usize, ch as u8, color as u8)
-}
-
-fn syscall_screen_set_pixel(arg_base: u64, arg_len: u64) -> Result<(), UserError> {
-    let (x, y) = <(u32, u32)>::unpack_u64(arg_base)?;
-    let color = Color::unpack_u64(arg_len)?;
-    program::set_screen_pixel(x as usize, y as usize, color)
-}
+// fn syscall_info_os_name(_arg_base: u64, _arg_len: u64) -> Result<(), UserError> {
+//     // TODO
+//     log::info!("Hello from userspace!");
+//     Ok(())
+// }
+//
+// fn syscall_info_os_version(_arg_base: u64, _arg_len: u64) -> Result<(), UserError> {
+//     unimplemented!();
+// }
+//
+// fn syscall_mem_alloc(_arg_base: u64, arg_len: u64) -> Result<u64, UserError> {
+//     let layout = Layout::unpack_u64(arg_len)?;
+//     Ok(program::with_current_program_allocator(|alloc| unsafe { alloc.alloc(layout) }) as u64)
+// }
+//
+// fn syscall_mem_dealloc(arg_base: u64, arg_len: u64) -> Result<(), UserError> {
+//     let ptr = arg_base as *mut u8;
+//     let layout = Layout::unpack_u64(arg_len)?;
+//     program::with_current_program_allocator(|alloc| unsafe { alloc.dealloc(ptr, layout) });
+//     Ok(())
+// }
+//
+// fn syscall_mem_alloc_zeroed(_arg_base: u64, arg_len: u64) -> Result<u64, UserError> {
+//     let layout = Layout::unpack_u64(arg_len)?;
+//     Ok(
+//         program::with_current_program_allocator(|alloc| unsafe { alloc.alloc_zeroed(layout) })
+//             as u64,
+//     )
+// }
+//
+// fn syscall_mem_realloc(_arg_base: u64, _arg_len: u64) -> Result<(), UserError> {
+//     unimplemented!();
+// }
+//
+// fn syscall_program_exit(_arg_base: u64, _arg_len: u64) -> ! {
+//     program::current_program_exit();
+// }
+//
+// fn syscall_program_panic(arg_base: u64, arg_len: u64) -> ! {
+//     let info = unsafe { core::slice::from_raw_parts(arg_base as *const u8, arg_len as usize) };
+//     let info = core::str::from_utf8(info).unwrap();
+//     log::warn!("Program aborted: {}", info);
+//     program::current_program_exit();
+// }
+//
+// fn syscall_program_load(_arg_base: u64, _arg_len: u64, user_stack: u64) -> ! {
+//     program::save_current_user_stack(user_stack);
+//     unimplemented!();
+// }
+//
+// fn syscall_program_wait_for_confirm(_arg_base: u64, _arg_len: u64) -> Result<(), UserError> {
+//     program::current_program_wait();
+//     Ok(())
+// }
+//
+// fn syscall_screen_create(arg_base: u64, _arg_len: u64) -> Result<(), UserError> {
+//     let arg = bool::unpack_u64(arg_base)?;
+//     program::create_screen(arg)
+// }
+//
+// fn syscall_screen_set_char(arg_base: u64, arg_len: u64) -> Result<(), UserError> {
+//     let (x, y) = <(u32, u32)>::unpack_u64(arg_base)?;
+//     let (ch, color) = <(u32, u32)>::unpack_u64(arg_len)?;
+//     program::set_screen_char(x as usize, y as usize, ch as u8, color as u8)
+// }
+//
+// fn syscall_screen_set_pixel(arg_base: u64, arg_len: u64) -> Result<(), UserError> {
+//     let (x, y) = <(u32, u32)>::unpack_u64(arg_base)?;
+//     let color = Color::unpack_u64(arg_len)?;
+//     program::set_screen_pixel(x as usize, y as usize, color)
+// }

@@ -5,19 +5,18 @@
 #![no_main]
 extern crate alloc;
 
-mod elf_loader;
-mod filesystem;
+//mod elf_loader;
+//mod filesystem;
 mod graphics;
 mod idt;
-mod logger;
 mod memory;
-mod program;
-mod screen;
+//mod program;
+//mod screen;
 mod userspace;
 
 use ata::{AtaError, BlockDevice};
-use bootloader_api::{info::FrameBufferInfo, entry_point, BootInfo, BootloaderConfig, config::Mapping};
-use core::panic::PanicInfo;
+use bootloader_api::{config::Mapping, entry_point, BootInfo, BootloaderConfig};
+use core::{fmt::Write, panic::PanicInfo};
 
 static OS_NAME: &str = "MariOS";
 static OS_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -32,7 +31,6 @@ static BOOTLOADER_CONFIG: BootloaderConfig = {
 // TODO pretty error messages
 #[derive(Debug)]
 enum KernelInitError {
-    FramebufferWrongSize,
     PhysicalMemoryNotMapped,
     AtaError(AtaError),
     AtaNoDrive,
@@ -52,63 +50,57 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         graphics::set_global_framebuffer(framebuffer);
     }
 
-    logger::init().unwrap();
-    log::info!("{}", OS_NAME);
-    log::info!("Kernel v{}", OS_VERSION);
-    log::info!(
-        "Bootloader v{}.{}.{}",
+    let half_width = graphics::get_global_framebuffer()
+        .map(|fb| fb.info().width as u32 / 2)
+        .unwrap_or_default();
+    let string_half_width = graphics::TextWriter::string_width(24) / 2;
+    let x = if half_width > string_half_width {
+        half_width - string_half_width
+    } else {
+        0
+    };
+    let mut init_writer = graphics::TextWriter::new(x, 64, u32::MAX, 0);
+    writeln!(init_writer, "         {}", OS_NAME).ok();
+    writeln!(init_writer, "     Kernel v{}", OS_VERSION).ok();
+    writeln!(
+        init_writer,
+        "   Bootloader v{}.{}.{}",
         boot_info.api_version.version_major(),
         boot_info.api_version.version_minor(),
         boot_info.api_version.version_patch()
-    );
-    if let Some(fb_info) = graphics::get_global_framebuffer().map(|fb| fb.info()) {
-        log::info!(
-            "Framebuffer size:{}x{}x{} format:{:?}",
-            fb_info.width,
-            fb_info.height,
-            fb_info.bytes_per_pixel,
-            fb_info.pixel_format
-        );
-        check_framebuffer_size(fb_info).unwrap();
-    }
+    )
+    .ok();
 
     let phys_offset = boot_info
         .physical_memory_offset
         .into_option()
         .ok_or(KernelInitError::PhysicalMemoryNotMapped)
         .unwrap();
-    log::info!("Loading GDT");
+    writeln!(init_writer, "       Loading GDT").ok();
     userspace::init_gdt();
-    log::info!("Loading IDT");
+    writeln!(init_writer, "       Loading IDT").ok();
     idt::init_idt();
-    log::info!("Setting up kernel memory");
+    writeln!(init_writer, "Setting up kernel memory").ok();
     memory::init_memory(phys_offset, &boot_info.memory_regions);
-    log::info!("Enabling interrupts");
+    writeln!(init_writer, "   Enabling interrupts").ok();
     idt::init_interrupts();
 
-    log::info!("Initializing ATA");
-    let drive_info = get_first_ata_drive().unwrap();
-    log::debug!(
-        "Found drive {} size:{}KiB",
-        drive_info.model,
-        drive_info.size_in_kib()
-    );
-    let user_partition = get_user_partition(drive_info.drive).unwrap();
-    log::debug!("  user partition size:{}KiB", user_partition.size_in_kib());
-    filesystem::init_fs(user_partition);
-    let entry_point = program::load_program("raytrace.elf").unwrap();
-    userspace::enter_userspace(entry_point);
-}
+    let level_data = level::Level::load(include_bytes!("../../assets/launcher.level")).unwrap();
+    graphics::LevelRenderer::draw_level(&level_data);
 
-fn check_framebuffer_size(fb_info: FrameBufferInfo) -> Result<(), KernelInitError> {
-    if fb_info.width == 640
-        && fb_info.height == 480
-        && fb_info.bytes_per_pixel == 4
-    {
-        Ok(())
-    } else {
-        Err(KernelInitError::FramebufferWrongSize)
-    }
+    hlt_loop();
+    // log::info!("Initializing ATA");
+    // let drive_info = get_first_ata_drive().unwrap();
+    // log::debug!(
+    //     "Found drive {} size:{}KiB",
+    //     drive_info.model,
+    //     drive_info.size_in_kib()
+    // );
+    // let user_partition = get_user_partition(drive_info.drive).unwrap();
+    // log::debug!("  user partition size:{}KiB", user_partition.size_in_kib());
+    // filesystem::init_fs(user_partition);
+    // let entry_point = program::load_program("raytrace.elf").unwrap();
+    // userspace::enter_userspace(entry_point);
 }
 
 fn get_first_ata_drive() -> Result<ata::DriveInfo, KernelInitError> {
@@ -145,14 +137,22 @@ pub fn hlt_loop() -> ! {
     }
 }
 
+#[macro_export]
+macro_rules! fatal_error {
+    ($($arg:tt)*) => {
+        let error_color = $crate::graphics::get_global_framebuffer().map(|fb| fb.encode_color(255, 0, 0)).unwrap_or(u32::MAX);
+        let mut error_writer = $crate::graphics::TextWriter::new(0, 0, error_color, 0);
+        error_writer.write_fmt(format_args!($($arg)*)).ok();
+        $crate::hlt_loop();
+    }
+}
+
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    log::error!("{}", info);
-    hlt_loop();
+    fatal_error!("{}", info);
 }
 
 #[alloc_error_handler]
 fn alloc_error_handler(layout: core::alloc::Layout) -> ! {
-    log::error!("alloc failed: {:?}", layout);
-    hlt_loop();
+    fatal_error!("alloc failed: {:?}", layout);
 }

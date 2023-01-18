@@ -2,6 +2,7 @@
 members = [
     "kernel",
     "drivers/ata",
+    "libraries/level",
     "libraries/kernel-common",
     "libraries/mbr",
     "libraries/std",
