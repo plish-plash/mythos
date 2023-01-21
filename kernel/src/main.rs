@@ -8,15 +8,18 @@ extern crate alloc;
 //mod elf_loader;
 //mod filesystem;
 mod graphics;
-mod idt;
+mod interrupt;
 mod memory;
 //mod program;
 //mod screen;
+mod game;
 mod userspace;
 
 use ata::{AtaError, BlockDevice};
 use bootloader_api::{config::Mapping, entry_point, BootInfo, BootloaderConfig};
 use core::{fmt::Write, panic::PanicInfo};
+
+use graphics::Texture;
 
 static OS_NAME: &str = "MariOS";
 static OS_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -46,20 +49,17 @@ impl From<AtaError> for KernelInitError {
 entry_point!(kernel_main, config = &BOOTLOADER_CONFIG);
 
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
-    if let Some(framebuffer) = boot_info.framebuffer.as_mut() {
-        graphics::set_global_framebuffer(framebuffer);
+    if let Some(framebuffer_info) = boot_info.framebuffer.as_mut() {
+        graphics::set_framebuffer(framebuffer_info);
     }
 
-    let half_width = graphics::get_global_framebuffer()
-        .map(|fb| fb.info().width as u32 / 2)
-        .unwrap_or_default();
-    let string_half_width = graphics::TextWriter::string_width(24) / 2;
-    let x = if half_width > string_half_width {
-        half_width - string_half_width
-    } else {
-        0
-    };
-    let mut init_writer = graphics::TextWriter::new(x, 64, u32::MAX, 0);
+    let (context, framebuffer) = graphics::setup_context();
+    context.clear(framebuffer);
+    graphics::load_system_font(&context);
+
+    let screen_width = framebuffer.width();
+    let mut init_writer = graphics::TextWriter::new(&context, framebuffer, 0, 64);
+    init_writer.center_x(screen_width, 24);
     writeln!(init_writer, "         {}", OS_NAME).ok();
     writeln!(init_writer, "     Kernel v{}", OS_VERSION).ok();
     writeln!(
@@ -79,16 +79,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     writeln!(init_writer, "       Loading GDT").ok();
     userspace::init_gdt();
     writeln!(init_writer, "       Loading IDT").ok();
-    idt::init_idt();
+    interrupt::init_idt();
     writeln!(init_writer, "Setting up kernel memory").ok();
     memory::init_memory(phys_offset, &boot_info.memory_regions);
     writeln!(init_writer, "   Enabling interrupts").ok();
-    idt::init_interrupts();
+    interrupt::init_interrupts();
 
-    let level_data = level::Level::load(include_bytes!("../../assets/launcher.level")).unwrap();
-    graphics::LevelRenderer::draw_level(&level_data);
-
-    hlt_loop();
+    game::run_game(&context, framebuffer);
     // log::info!("Initializing ATA");
     // let drive_info = get_first_ata_drive().unwrap();
     // log::debug!(
@@ -140,8 +137,8 @@ pub fn hlt_loop() -> ! {
 #[macro_export]
 macro_rules! fatal_error {
     ($($arg:tt)*) => {
-        let error_color = $crate::graphics::get_global_framebuffer().map(|fb| fb.encode_color(255, 0, 0)).unwrap_or(u32::MAX);
-        let mut error_writer = $crate::graphics::TextWriter::new(0, 0, error_color, 0);
+        let (context, framebuffer) = $crate::graphics::setup_context();
+        let mut error_writer = $crate::graphics::TextWriter::new(&context, framebuffer, 0, 0);
         error_writer.write_fmt(format_args!($($arg)*)).ok();
         $crate::hlt_loop();
     }

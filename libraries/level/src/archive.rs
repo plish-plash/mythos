@@ -5,7 +5,7 @@ use core::{
 };
 use tar_no_std::TarArchiveRef;
 
-use crate::{Level, Tileset};
+use crate::Level;
 
 #[derive(Debug)]
 pub enum LevelLoadError {
@@ -70,18 +70,14 @@ impl LevelArchive {
         let archive = TarArchiveRef::new(data);
         let mut width = 0;
         let mut height = 0;
-        let mut background_tileset = Tileset::default();
         let mut background_tiles = Vec::new();
-        let mut foreground_tileset = Tileset::default();
         let mut foreground_tiles = Vec::new();
         for entry in archive.entries() {
             match entry.filename().as_str() {
-                "background_tiles.data" => background_tileset = Tileset::from_data(entry.data()),
                 "background.csv" => {
                     background_tiles =
                         Self::load_csv(entry.data_as_str()?, &mut width, &mut height)?
                 }
-                "foreground_tiles.data" => foreground_tileset = Tileset::from_data(entry.data()),
                 "foreground.csv" => {
                     foreground_tiles =
                         Self::load_csv(entry.data_as_str()?, &mut width, &mut height)?
@@ -94,10 +90,9 @@ impl LevelArchive {
             height,
             scroll: (0, 0),
             background_color: 0xffff9494, // TODO
-            background_tileset,
             background_tiles,
-            foreground_tileset,
             foreground_tiles,
+            objects: Vec::new(),
         })
     }
 }

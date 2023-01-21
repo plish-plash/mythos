@@ -3,60 +3,45 @@ extern crate alloc;
 
 mod archive;
 
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 
 pub use archive::LevelLoadError;
 
-pub trait BlitSource {
-    fn stride(&self) -> usize;
-    fn blit_width(&self) -> u32;
-    fn blit_height(&self) -> u32;
-    fn index(&self, x: u32, y: u32) -> usize {
-        x as usize + (y as usize * self.stride())
-    }
-    fn get_pixel(&self, index: usize) -> u32;
+pub enum ObjectDraw {
+    Hidden,
+    Text(String),
+    Image(usize, u32),
 }
 
-#[derive(Default)]
-pub struct Tileset(Vec<u32>);
+pub struct Object {
+    pub kind: &'static str,
+    pub x: f32,
+    pub y: f32,
+    pub width: u32,
+    pub height: u32,
+    pub draw: ObjectDraw,
+}
 
-impl Tileset {
-    pub fn from_data(data: &[u8]) -> Self {
-        Tileset(
-            data.chunks_exact(4)
-                .map(|value| u32::from_ne_bytes(value.try_into().unwrap()))
-                .collect(),
-        )
+impl Object {
+    pub fn pixel_x(&self) -> i32 {
+        self.x as i32
+    }
+    pub fn pixel_y(&self) -> i32 {
+        self.y as i32
     }
 }
 
-impl BlitSource for Tileset {
-    fn stride(&self) -> usize {
-        self.0.len() / 16
-    }
-    fn blit_width(&self) -> u32 {
-        16
-    }
-    fn blit_height(&self) -> u32 {
-        16
-    }
-    fn index(&self, x: u32, _y: u32) -> usize {
-        (x * 16) as usize
-    }
-    fn get_pixel(&self, index: usize) -> u32 {
-        self.0[index]
-    }
-}
+#[derive(Clone, Copy)]
+pub struct ObjectId(usize);
 
 pub struct Level {
     width: usize,
     height: usize,
     scroll: (i32, i32),
     background_color: u32,
-    background_tileset: Tileset,
     background_tiles: Vec<u8>,
-    foreground_tileset: Tileset,
     foreground_tiles: Vec<u8>,
+    objects: Vec<Option<Object>>,
 }
 
 impl Level {
@@ -78,12 +63,6 @@ impl Level {
     }
     pub fn background_color(&self) -> u32 {
         self.background_color
-    }
-    pub fn background_tileset(&self) -> &Tileset {
-        &self.background_tileset
-    }
-    pub fn foreground_tileset(&self) -> &Tileset {
-        &self.foreground_tileset
     }
 
     fn get_index(&self, x: u32, y: u32) -> usize {
@@ -108,5 +87,32 @@ impl Level {
     pub fn set_foreground_tile(&mut self, x: u32, y: u32, tile: u8) {
         let idx = self.get_index(x, y);
         self.foreground_tiles[idx] = tile;
+    }
+
+    pub fn get_object(&mut self, id: ObjectId) -> Option<&mut Object> {
+        self.objects.get_mut(id.0).and_then(|obj| obj.as_mut())
+    }
+    pub fn add_object(&mut self, object: Object) -> ObjectId {
+        for (index, slot) in self.objects.iter_mut().enumerate() {
+            if slot.is_none() {
+                *slot = Some(object);
+                return ObjectId(index);
+            }
+        }
+        let index = self.objects.len();
+        self.objects.push(Some(object));
+        ObjectId(index)
+    }
+    pub fn remove_object(&mut self, id: ObjectId) -> bool {
+        if let Some(slot) = self.objects.get_mut(id.0) {
+            if slot.is_some() {
+                *slot = None;
+                return true;
+            }
+        }
+        false
+    }
+    pub fn objects(&self) -> impl Iterator<Item = &Object> {
+        self.objects.iter().filter_map(|obj| obj.as_ref())
     }
 }

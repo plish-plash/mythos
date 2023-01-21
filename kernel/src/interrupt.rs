@@ -97,18 +97,34 @@ pub fn init_idt() {
     }
 }
 pub fn init_interrupts() {
-    unsafe { PICS.lock().initialize() };
+    use x86_64::instructions::port::Port;
+    unsafe {
+        PICS.lock().initialize();
+    }
+
+    // Configure timer.
+    let timer_rate = 19853_u16; // 60.1 Hz
+    let mut timer_command_port = Port::new(0x43);
+    let mut timer_data_port = Port::new(0x40);
+    unsafe {
+        timer_command_port.write(0b00110100_u8); // channel 0, lobyte/hibyte, rate generator
+        timer_data_port.write((timer_rate & 0xFF) as u8); // divider lobyte
+        timer_data_port.write(((timer_rate >> 8) & 0xFF) as u8); // divider hibyte
+    }
 
     x86_64::instructions::interrupts::enable();
 
     // The keyboard won't send new interrupts if there is a scancode pending. Read and discard the
     // scancode here in case the user was mashing keys during setup.
-    use x86_64::instructions::port::Port;
-    let mut port = Port::new(0x60);
-    let _scancode: u8 = unsafe { port.read() };
+    unsafe {
+        Port::<u8>::new(0x60).read();
+    }
 }
 
 extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    unsafe {
+        crate::game::WAIT_FRAME = false;
+    }
     InterruptIndex::Timer.end_interrupt();
 }
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
