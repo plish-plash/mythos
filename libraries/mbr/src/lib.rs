@@ -1,3 +1,5 @@
+// Based on https://github.com/ischeinkman/mbr-nostd
+
 #![no_std]
 
 mod error;

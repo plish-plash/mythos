@@ -1,16 +1,12 @@
-use core::fmt::Write;
-use pc_keyboard::{layouts, DecodedKey, HandleControl, Keyboard, ScancodeSet1};
-use pic8259::ChainedPics;
-use uniquelock::{Spinlock, UniqueLock};
-use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
-
 use crate::fatal_error;
+use pc_keyboard::{layouts, HandleControl, Keyboard, ScancodeSet1};
+use pic8259::ChainedPics;
+use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
 static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();
 
 const PIC_OFFSET: u8 = 32;
-static PICS: Spinlock<ChainedPics> =
-    Spinlock::new(unsafe { ChainedPics::new(PIC_OFFSET, PIC_OFFSET + 8) });
+static mut PICS: ChainedPics = unsafe { ChainedPics::new(PIC_OFFSET, PIC_OFFSET + 8) };
 
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
@@ -25,13 +21,16 @@ impl InterruptIndex {
     #[inline(always)]
     fn end_interrupt(self) {
         unsafe {
-            PICS.lock().notify_end_of_interrupt(self as u8);
+            PICS.notify_end_of_interrupt(self as u8);
         }
     }
 }
 
-static KEYBOARD: UniqueLock<Keyboard<layouts::Us104Key, ScancodeSet1>> =
-    UniqueLock::new("keyboard", Keyboard::new(HandleControl::Ignore));
+static mut KEYBOARD: Keyboard<layouts::Us104Key, ScancodeSet1> = Keyboard::new(
+    ScancodeSet1::new(),
+    layouts::Us104Key,
+    HandleControl::Ignore,
+);
 
 pub fn init_idt() {
     unsafe {
@@ -99,7 +98,7 @@ pub fn init_idt() {
 pub fn init_interrupts() {
     use x86_64::instructions::port::Port;
     unsafe {
-        PICS.lock().initialize();
+        PICS.initialize();
     }
 
     // Configure timer.
@@ -122,30 +121,24 @@ pub fn init_interrupts() {
 }
 
 extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    unsafe {
-        crate::game::WAIT_FRAME = false;
-    }
+    // unsafe {
+    //     crate::game::WAIT_FRAME = false;
+    // }
+    // TODO
     InterruptIndex::Timer.end_interrupt();
 }
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
     use x86_64::instructions::port::Port;
-    let mut keyboard = KEYBOARD.lock().unwrap();
     let mut port = Port::new(0x60);
     let scancode: u8 = unsafe { port.read() };
-    let mut confirm = false;
-    if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
-        if let Some(key) = keyboard.process_keyevent(key_event) {
+    if let Ok(Some(key_event)) = unsafe { KEYBOARD.add_byte(scancode) } {
+        if let Some(key) = unsafe { KEYBOARD.process_keyevent(key_event) } {
             match key {
                 // DecodedKey::Unicode(character) => log::trace!("Keyboard:{}", character),
                 // DecodedKey::RawKey(key) => log::trace!("Keyboard:{:?}", key),
-                DecodedKey::Unicode(' ') => confirm = true,
-                DecodedKey::Unicode('\n') => confirm = true,
                 _ => (),
             }
         }
-    }
-    if confirm {
-        // crate::program::current_program_notify();
     }
     InterruptIndex::Keyboard.end_interrupt();
 }
@@ -205,7 +198,13 @@ extern "x86-interrupt" fn page_fault_handler(
     _stack_frame: InterruptStackFrame,
     error_code: PageFaultErrorCode,
 ) {
-    fatal_error!("EXCEPTION: {}({:b})", "PAGE FAULT", error_code.bits());
+    let fault_address = x86_64::registers::control::Cr2::read();
+    fatal_error!(
+        "EXCEPTION: {}({:06b}) {:#x}",
+        "PAGE FAULT",
+        error_code,
+        fault_address
+    );
 }
 extern "x86-interrupt" fn alignment_check_handler(
     _stack_frame: InterruptStackFrame,

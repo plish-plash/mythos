@@ -3,7 +3,6 @@ extern crate alloc;
 
 use alloc::{string::String, vec::Vec};
 use bit_field::BitField;
-use uniquelock::UniqueLock;
 use x86_64::instructions::port::{Port, PortReadOnly, PortWriteOnly};
 
 pub use block_device::BlockDevice;
@@ -13,7 +12,7 @@ pub use block_device::BlockDevice;
 
 fn sleep_ticks(ticks: usize) {
     for _ in 0..=ticks {
-        x86_64::instructions::hlt();
+        x86_64::instructions::nop();
     }
 }
 
@@ -274,20 +273,14 @@ impl Bus {
     }
 }
 
-static BUSES: UniqueLock<Vec<Bus>> = UniqueLock::new("ATA buses", Vec::new());
+static mut BUSES: Option<[Bus; 2]> = None;
 
 #[derive(Debug, Copy, Clone)]
 pub enum AtaError {
-    AlreadyInUse,
+    NotInitialized,
     AddressNotAligned,
     OutOfBounds,
     WrongSizeBuffer,
-}
-
-impl From<uniquelock::LockError> for AtaError {
-    fn from(_value: uniquelock::LockError) -> Self {
-        AtaError::AlreadyInUse
-    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -341,7 +334,7 @@ impl BlockDevice for Drive {
             return Err(AtaError::WrongSizeBuffer);
         }
         let address = self.byte_index_to_lba(address, number_of_blocks)?;
-        let mut buses = BUSES.lock()?;
+        let buses = unsafe { BUSES.as_mut().ok_or(AtaError::NotInitialized)? };
         for i in 0..number_of_blocks {
             let off = i * BLOCK_SIZE;
             buses[self.bus].read(
@@ -363,7 +356,7 @@ impl BlockDevice for Drive {
             return Err(AtaError::WrongSizeBuffer);
         }
         let address = self.byte_index_to_lba(address, number_of_blocks)?;
-        let mut buses = BUSES.lock()?;
+        let buses = unsafe { BUSES.as_mut().ok_or(AtaError::NotInitialized)? };
         for i in 0..number_of_blocks {
             let off = i * BLOCK_SIZE;
             buses[self.bus].write(
@@ -448,7 +441,7 @@ impl DriveInfo {
 }
 
 pub fn list() -> Result<Vec<DriveInfo>, AtaError> {
-    let mut buses = BUSES.lock()?;
+    let buses = unsafe { BUSES.as_mut().ok_or(AtaError::NotInitialized)? };
     let mut res = Vec::new();
     for bus in 0..2 {
         for drive in 0..2 {
@@ -483,9 +476,6 @@ pub fn list() -> Result<Vec<DriveInfo>, AtaError> {
 //     unsafe { BUSES.lock()[bus].status_register.read() != 0xFF }
 // }
 
-pub fn init() -> Result<(), AtaError> {
-    let mut buses = BUSES.lock()?;
-    buses.push(Bus::new(0, 0x1F0, 0x3F6, 14));
-    buses.push(Bus::new(1, 0x170, 0x376, 15));
-    Ok(())
+pub unsafe fn init() {
+    BUSES = Some([Bus::new(0, 0x1F0, 0x3F6, 14), Bus::new(1, 0x170, 0x376, 15)]);
 }

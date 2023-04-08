@@ -4,17 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bootloader_api = "0.11"
-x86_64 = "0.14"
-pic8259 = "0.10"
-pc-keyboard = "0.6"
-xmas-elf = "0.9"
-fat32 = "0.2"
+x86_64 = "*"
+bootloader_api = "0.11.3"
+pic8259 = "0.10.3"
+pc-keyboard = "0.7.0"
+xmas-elf = "0.9.0"
+linked_list_allocator = "0.10.5"
 
-linked_list_allocator = "0.10"
-
-ata = { path = "../drivers/ata" }
 kernel-common = { path = "../libraries/kernel-common" }
-mbr = { path = "../libraries/mbr" }
-uniquelock = { path = "../libraries/uniquelock" }
-level = { path = "../libraries/level" }

@@ -1,91 +1,81 @@
 #![feature(abi_x86_interrupt)]
 #![feature(alloc_error_handler)]
-#![feature(naked_functions)]
+#![feature(asm_const)]
+#![feature(step_trait)]
 #![no_std]
 #![no_main]
 extern crate alloc;
 
-//mod elf_loader;
-//mod filesystem;
+mod elf_loader;
 mod graphics;
 mod interrupt;
 mod memory;
-//mod program;
-//mod screen;
-mod game;
 mod userspace;
 
-use ata::{AtaError, BlockDevice};
+use alloc::{format, string::String};
 use bootloader_api::{config::Mapping, entry_point, BootInfo, BootloaderConfig};
-use core::{fmt::Write, panic::PanicInfo};
-
-use graphics::Texture;
 
 static OS_NAME: &str = "MariOS";
 static OS_VERSION: &str = env!("CARGO_PKG_VERSION");
+static mut BOOTLOADER_VERSION: Option<String> = None;
 
 static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
-    config.mappings.dynamic_range_start = Some(0xd000_0000_0000);
     config.mappings.physical_memory = Some(Mapping::FixedAddress(0xf000_0000_0000));
     config
 };
 
-// TODO pretty error messages
-#[derive(Debug)]
-enum KernelInitError {
-    PhysicalMemoryNotMapped,
-    AtaError(AtaError),
-    AtaNoDrive,
-    InvalidDiskMbr,
-}
-
-impl From<AtaError> for KernelInitError {
-    fn from(err: AtaError) -> Self {
-        KernelInitError::AtaError(err)
-    }
-}
-
 entry_point!(kernel_main, config = &BOOTLOADER_CONFIG);
 
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
-    if let Some(framebuffer_info) = boot_info.framebuffer.as_mut() {
-        graphics::set_framebuffer(framebuffer_info);
-    }
+    // Save the framebuffer info from the bootloader.
+    let framebuffer_memory =
+        graphics::init_graphics(boot_info.framebuffer.as_mut().expect("no framebuffer"));
 
-    let (context, framebuffer) = graphics::setup_context();
-    context.clear(framebuffer);
-    graphics::load_system_font(&context);
-
-    let screen_width = framebuffer.width();
-    let mut init_writer = graphics::TextWriter::new(&context, framebuffer, 0, 64);
-    init_writer.center_x(screen_width, 24);
-    writeln!(init_writer, "         {}", OS_NAME).ok();
-    writeln!(init_writer, "     Kernel v{}", OS_VERSION).ok();
-    writeln!(
-        init_writer,
-        "   Bootloader v{}.{}.{}",
-        boot_info.api_version.version_major(),
-        boot_info.api_version.version_minor(),
-        boot_info.api_version.version_patch()
-    )
-    .ok();
-
-    let phys_offset = boot_info
-        .physical_memory_offset
-        .into_option()
-        .ok_or(KernelInitError::PhysicalMemoryNotMapped)
-        .unwrap();
-    writeln!(init_writer, "       Loading GDT").ok();
+    // Configure core hardware.
     userspace::init_gdt();
-    writeln!(init_writer, "       Loading IDT").ok();
     interrupt::init_idt();
-    writeln!(init_writer, "Setting up kernel memory").ok();
-    memory::init_memory(phys_offset, &boot_info.memory_regions);
-    writeln!(init_writer, "   Enabling interrupts").ok();
+    memory::init_memory(
+        boot_info
+            .physical_memory_offset
+            .into_option()
+            .expect("physical memory not mapped"),
+        &boot_info.memory_regions,
+    );
     interrupt::init_interrupts();
 
-    game::run_game(&context, framebuffer);
+    // Save bootloader version
+    let api_version = boot_info.api_version;
+    let bootloader_version = format!(
+        "{}.{}.{}",
+        api_version.version_major(),
+        api_version.version_minor(),
+        api_version.version_patch()
+    );
+    unsafe {
+        BOOTLOADER_VERSION = Some(bootloader_version);
+    }
+
+    // Allow userspace to directly access the framebuffer memory.
+    memory::user_memory_mapper()
+        .make_range_user_accessible(framebuffer_memory)
+        .unwrap();
+
+    // Start the userspace program, which loads drivers and other programs from the filesystem.
+    let ramdisk = unsafe {
+        core::slice::from_raw_parts(
+            boot_info
+                .ramdisk_addr
+                .into_option()
+                .expect("bootloader did not load ramdisk") as *const u8,
+            boot_info.ramdisk_len as usize,
+        )
+    };
+    elf_loader::start_load().unwrap();
+    elf_loader::load_bytes(ramdisk).unwrap();
+    let (entry_point, _tls_template) = elf_loader::finish_load().unwrap();
+    userspace::enter_userspace(entry_point);
+
     // log::info!("Initializing ATA");
     // let drive_info = get_first_ata_drive().unwrap();
     // log::debug!(
@@ -100,52 +90,45 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // userspace::enter_userspace(entry_point);
 }
 
-fn get_first_ata_drive() -> Result<ata::DriveInfo, KernelInitError> {
-    ata::init()?;
-    ata::list()?
-        .into_iter()
-        .next()
-        .ok_or(KernelInitError::AtaNoDrive)
-}
+// fn get_first_ata_drive() -> ata::DriveInfo {
+//     ata::list()
+//         .unwrap()
+//         .into_iter()
+//         .next()
+//         .expect("no connected drives")
+// }
 
-fn get_user_partition(drive: ata::Drive) -> Result<ata::Partition, KernelInitError> {
-    let mut mbr_bytes = alloc::vec![0u8; 512];
-    drive.read(&mut mbr_bytes, 0, 1).unwrap();
-    let mbr = mbr::MasterBootRecord::from_bytes(&mbr_bytes)
-        .map_err(|_| KernelInitError::InvalidDiskMbr)?;
-    if mbr.entries[0].partition_type == mbr::PartitionType::Unused
-        || mbr.entries[1].partition_type == mbr::PartitionType::Unused
-    {
-        return Err(KernelInitError::InvalidDiskMbr);
-    }
-    if !mbr.entries[0].bootable || mbr.entries[0].logical_block_address != 0 {
-        return Err(KernelInitError::InvalidDiskMbr);
-    }
-    Ok(ata::Partition::new(
-        drive,
-        mbr.entries[1].logical_block_address as usize,
-        mbr.entries[1].sector_count as usize,
-    ))
-}
-
-pub fn hlt_loop() -> ! {
-    loop {
-        x86_64::instructions::hlt();
-    }
-}
+// fn get_user_partition(drive: ata::Drive) -> ata::Partition {
+//     let mut mbr_bytes = alloc::vec![0u8; 512];
+//     drive.read(&mut mbr_bytes, 0, 1).unwrap();
+//     let mbr = mbr::MasterBootRecord::from_bytes(&mbr_bytes).unwrap();
+//     if mbr.entries[2].partition_type != mbr::PartitionType::Fat32(0x0c) || !mbr.entries[2].bootable {
+//         panic!("invalid filesystem partition");
+//     }
+//     ata::Partition::new(
+//         drive,
+//         mbr.entries[2].logical_block_address as usize,
+//         mbr.entries[2].sector_count as usize,
+//     )
+// }
 
 #[macro_export]
 macro_rules! fatal_error {
-    ($($arg:tt)*) => {
-        let (context, framebuffer) = $crate::graphics::setup_context();
-        let mut error_writer = $crate::graphics::TextWriter::new(&context, framebuffer, 0, 0);
-        error_writer.write_fmt(format_args!($($arg)*)).ok();
-        $crate::hlt_loop();
-    }
+    ($($arg:tt)*) => {{
+        use core::fmt::Write;
+        if let Some(mut framebuffer) = unsafe { $crate::graphics::framebuffer() } {
+            let context = $crate::graphics::context();
+            let mut error_writer = $crate::graphics::TextWriter::new(&context, &mut framebuffer, 0, 0);
+            error_writer.write_fmt(format_args!($($arg)*)).ok();
+        }
+        loop {
+            x86_64::instructions::hlt();
+        }
+    }}
 }
 
 #[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
+fn panic(info: &core::panic::PanicInfo) -> ! {
     fatal_error!("{}", info);
 }
 

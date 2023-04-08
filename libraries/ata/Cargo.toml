@@ -6,7 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+x86_64 = "*"
 bit_field = "*"
-x86_64 = "0.14"
-block_device = "0.1"
-uniquelock = { path = "../../libraries/uniquelock" }
+block_device = "0.1.3"

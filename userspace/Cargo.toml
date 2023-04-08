@@ -1,0 +1,9 @@
+[package]
+name = "userspace"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+x86_64 = "*"
+kernel-common = { path = "../libraries/kernel-common" }
+ata = { path = "../libraries/ata" }

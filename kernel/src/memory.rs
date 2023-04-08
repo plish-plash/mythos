@@ -1,17 +1,39 @@
-use alloc::collections::BTreeMap;
 use bootloader_api::info::{MemoryRegionKind, MemoryRegions};
 use linked_list_allocator::LockedHeap;
-use uniquelock::{UniqueGuard, UniqueLock, UniqueOnce};
 use x86_64::{
     structures::paging::{
-        mapper::{MapToError, TranslateError, UnmapError},
+        mapper::{FlagUpdateError, MapToError, MappedFrame, TranslateResult, UnmapError},
         *,
     },
     PhysAddr, VirtAddr,
 };
 
+pub const PAGE_SIZE: usize = Size4KiB::SIZE as usize;
+
 #[global_allocator]
 static ALLOCATOR: LockedHeap = LockedHeap::empty();
+
+#[derive(Debug, Copy, Clone)]
+pub struct VirtMemRange(u64, u64);
+
+impl VirtMemRange {
+    pub const fn new(start: u64, size: usize) -> VirtMemRange {
+        VirtMemRange(start, size as u64)
+    }
+    pub fn start(&self) -> VirtAddr {
+        VirtAddr::new(self.0)
+    }
+    pub fn stack_start(&self) -> VirtAddr {
+        // Stacks grow upward and must be 16-byte aligned.
+        VirtAddr::new(self.0 + self.1 - 16)
+    }
+    pub fn last_addr(&self) -> VirtAddr {
+        VirtAddr::new(self.0 + self.1 - 1)
+    }
+    pub const fn size(&self) -> usize {
+        self.1 as usize
+    }
+}
 
 /// A FrameAllocator that returns usable frames from the bootloader's memory map.
 struct BootInfoFrameAllocator {
@@ -56,69 +78,52 @@ unsafe fn active_level_4_table(phys_offset: VirtAddr) -> &'static mut PageTable 
     &mut *page_table_ptr // unsafe
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct VirtMemRange(u64, u64);
-
-impl VirtMemRange {
-    const fn new(start: u64, size: usize) -> VirtMemRange {
-        VirtMemRange(start, size as u64)
-    }
-    const fn end_u64(&self) -> u64 {
-        self.0 + self.1
-    }
-    pub fn start(&self) -> VirtAddr {
-        VirtAddr::new(self.0)
-    }
-    pub fn stack_start(&self) -> VirtAddr {
-        VirtAddr::new(self.0 + self.1 - 16)
-    } // Stacks grow up and must be 16-byte aligned.
-    pub fn last_addr(&self) -> VirtAddr {
-        VirtAddr::new(self.0 + self.1 - 1)
-    }
-    pub const fn size(&self) -> usize {
-        self.1 as usize
-    }
-    pub fn size_kib(&self) -> usize {
-        self.size() / 1024
-    }
-}
-
 // TODO secure against stack overflows
 // TODO allow heaps to map more memory as needed
-const EXECUTION_MEMORY_START: u64 = 0xc000_0000_0000;
-pub const KERNEL_STACK_MEMORY: VirtMemRange = VirtMemRange::new(EXECUTION_MEMORY_START, 8 * 1024);
-pub const KERNEL_HEAP_MEMORY: VirtMemRange =
-    VirtMemRange::new(KERNEL_STACK_MEMORY.end_u64(), 8 * 1024 * 1024);
-pub const USER_STACK_MEMORY: VirtMemRange =
-    VirtMemRange::new(KERNEL_HEAP_MEMORY.end_u64(), 512 * 1024);
-pub const USER_HEAP_MEMORY: VirtMemRange =
-    VirtMemRange::new(USER_STACK_MEMORY.end_u64(), 1024 * 1024);
+pub struct KernelMemory {
+    pub privilege_stack: VirtMemRange,
+    pub interrupt_stack: VirtMemRange,
+    pub double_fault_stack: VirtMemRange,
+    heap: VirtMemRange,
+}
 
-pub trait MemoryMapper {
-    fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>>;
-    unsafe fn map_page(
-        &mut self,
-        page: Page<Size4KiB>,
-        frame: PhysFrame<Size4KiB>,
-        flags: PageTableFlags,
-    ) -> Result<(), MapToError<Size4KiB>>;
-    fn translate_page(&self, page: Page<Size4KiB>) -> Result<PhysFrame<Size4KiB>, TranslateError>;
-
-    fn alloc_writable_range(&mut self, range: VirtMemRange) -> Result<(), MapToError<Size4KiB>> {
-        let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
-        let range_start = Page::from_start_address(range.start()).unwrap();
-        let range_end = Page::containing_address(range.last_addr());
-        for page in Page::range_inclusive(range_start, range_end) {
-            let frame = self
-                .allocate_frame()
-                .ok_or(MapToError::FrameAllocationFailed)?;
-            unsafe {
-                self.map_page(page, frame, flags)?;
-            }
+impl KernelMemory {
+    const STACK_SIZE: usize = PAGE_SIZE;
+    const HEAP_SIZE: usize = PAGE_SIZE * 8;
+    const fn new(base_addr: u64) -> Self {
+        let offset = Self::STACK_SIZE as u64;
+        KernelMemory {
+            privilege_stack: VirtMemRange::new(base_addr, Self::STACK_SIZE),
+            interrupt_stack: VirtMemRange::new(base_addr + offset, Self::STACK_SIZE),
+            double_fault_stack: VirtMemRange::new(base_addr + (offset * 2), Self::STACK_SIZE),
+            heap: VirtMemRange::new(base_addr + (offset * 3), Self::HEAP_SIZE),
         }
-        Ok(())
+    }
+    const fn len() -> usize {
+        (Self::STACK_SIZE * 3) + Self::HEAP_SIZE
     }
 }
+
+pub struct UserMemory {
+    pub stack: VirtMemRange,
+    heap: VirtMemRange,
+}
+
+impl UserMemory {
+    const STACK_SIZE: usize = PAGE_SIZE * 4;
+    const HEAP_SIZE: usize = PAGE_SIZE * 64;
+    const fn new(base_addr: u64) -> Self {
+        UserMemory {
+            stack: VirtMemRange::new(base_addr, Self::STACK_SIZE),
+            heap: VirtMemRange::new(base_addr + (Self::STACK_SIZE as u64), Self::HEAP_SIZE),
+        }
+    }
+}
+
+const EXECUTION_MEMORY_START: u64 = 0xc000_0000_0000;
+pub const KERNEL_MEMORY: KernelMemory = KernelMemory::new(EXECUTION_MEMORY_START);
+pub const USER_MEMORY: UserMemory =
+    UserMemory::new(EXECUTION_MEMORY_START + (KernelMemory::len() as u64));
 
 struct KernelMemoryMapper {
     frame_allocator: BootInfoFrameAllocator,
@@ -126,13 +131,11 @@ struct KernelMemoryMapper {
     phys_offset: VirtAddr,
 }
 
-// not actually Send, but we don't use multithreading :)
-unsafe impl Send for KernelMemoryMapper {}
-
 impl KernelMemoryMapper {
     fn init(
         phys_offset: VirtAddr,
         memory_regions: &'static MemoryRegions,
+        memory_layout: KernelMemory,
     ) -> Result<KernelMemoryMapper, MapToError<Size4KiB>> {
         let mapper = unsafe {
             let level_4_table = active_level_4_table(phys_offset);
@@ -145,14 +148,15 @@ impl KernelMemoryMapper {
             mapper,
             phys_offset,
         };
-        kernel_mapper.alloc_writable_range(KERNEL_STACK_MEMORY)?;
-        kernel_mapper.alloc_writable_range(KERNEL_HEAP_MEMORY)?;
+        let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
+        kernel_mapper.alloc_and_map_range(memory_layout.privilege_stack, flags)?;
+        kernel_mapper.alloc_and_map_range(memory_layout.interrupt_stack, flags)?;
+        kernel_mapper.alloc_and_map_range(memory_layout.double_fault_stack, flags)?;
+        kernel_mapper.alloc_and_map_range(memory_layout.heap, flags)?;
         x86_64::instructions::tlb::flush_all();
         Ok(kernel_mapper)
     }
-}
 
-impl MemoryMapper for KernelMemoryMapper {
     fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
         self.frame_allocator.allocate_frame()
     }
@@ -167,130 +171,148 @@ impl MemoryMapper for KernelMemoryMapper {
             .ignore();
         Ok(())
     }
-    fn translate_page(&self, page: Page<Size4KiB>) -> Result<PhysFrame<Size4KiB>, TranslateError> {
-        self.mapper.translate_page(page)
-    }
-}
 
-pub struct MemoryContext {
-    local_map: BTreeMap<Page<Size4KiB>, (PhysFrame<Size4KiB>, PageTableFlags)>,
-    pub allocator: LockedHeap,
-}
-
-impl MemoryContext {
-    fn new() -> MemoryContext {
-        MemoryContext {
-            local_map: BTreeMap::new(),
-            allocator: LockedHeap::empty(),
-        }
-    }
-}
-
-pub struct UserMemoryMapper {
-    kernel_mapper: UniqueGuard<'static, KernelMemoryMapper>,
-    user_context: MemoryContext,
-}
-
-impl UserMemoryMapper {
-    pub fn init() -> Result<UserMemoryMapper, MapToError<Size4KiB>> {
-        let kernel_mapper = MEMORY_MAPPER.get().unwrap().lock().unwrap();
-        let mut user_mapper = UserMemoryMapper {
-            kernel_mapper,
-            user_context: MemoryContext::new(),
-        };
-        user_mapper.alloc_writable_range(USER_STACK_MEMORY)?;
-        user_mapper.alloc_writable_range(USER_HEAP_MEMORY)?;
-        user_mapper.user_context.allocator = unsafe {
-            LockedHeap::new(
-                USER_HEAP_MEMORY.start().as_mut_ptr(),
-                USER_HEAP_MEMORY.size(),
-            )
-        };
-        Ok(user_mapper)
-    }
-    pub fn finish_load(self) -> MemoryContext {
-        x86_64::instructions::tlb::flush_all();
-        self.user_context
-    }
-    pub fn restore_context(user_context: &MemoryContext) -> Result<(), MapToError<Size4KiB>> {
-        let mut kernel_mapper = MEMORY_MAPPER.get().unwrap().lock().unwrap();
-        for (page, (frame, flags)) in user_context.local_map.iter() {
+    fn alloc_and_map_range(
+        &mut self,
+        range: VirtMemRange,
+        flags: PageTableFlags,
+    ) -> Result<(), MapToError<Size4KiB>> {
+        let range_start = Page::from_start_address(range.start()).unwrap();
+        let range_end = Page::containing_address(range.last_addr());
+        for page in Page::range_inclusive(range_start, range_end) {
+            let frame = self
+                .allocate_frame()
+                .ok_or(MapToError::FrameAllocationFailed)?;
             unsafe {
-                kernel_mapper.map_page(*page, *frame, *flags)?;
+                self.map_page(page, frame, flags)?;
             }
         }
         Ok(())
     }
+}
 
+pub struct UserMemoryMapper {
+    kernel_mapper: &'static mut KernelMemoryMapper,
+    allocator: LockedHeap,
+}
+
+impl UserMemoryMapper {
+    pub fn init(memory_layout: UserMemory) -> Result<UserMemoryMapper, MapToError<Size4KiB>> {
+        let kernel_mapper = unsafe {
+            KERNEL_MEMORY_MAPPER
+                .as_mut()
+                .expect("no kernel memory mapper")
+        };
+        let flags =
+            PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
+        kernel_mapper.alloc_and_map_range(memory_layout.stack, flags)?;
+        kernel_mapper.alloc_and_map_range(memory_layout.heap, flags)?;
+        Ok(UserMemoryMapper {
+            kernel_mapper,
+            allocator: unsafe {
+                LockedHeap::new(
+                    memory_layout.heap.start().as_mut_ptr(),
+                    memory_layout.heap.size(),
+                )
+            },
+        })
+    }
+
+    pub fn phys_offset(&self, phys_addr: PhysAddr) -> VirtAddr {
+        VirtAddr::new(phys_addr.as_u64() + self.kernel_mapper.phys_offset.as_u64())
+    }
+
+    pub fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
+        self.kernel_mapper.frame_allocator.allocate_frame()
+    }
+    pub fn finish_load(&mut self) {
+        x86_64::instructions::tlb::flush_all();
+    }
+
+    pub fn page_table(&self) -> &OffsetPageTable<'static> {
+        &self.kernel_mapper.mapper
+    }
     pub fn page_table_mut(&mut self) -> &mut OffsetPageTable<'static> {
         &mut self.kernel_mapper.mapper
     }
-    pub fn untranslate(&self, phys_addr: PhysAddr) -> VirtAddr {
-        VirtAddr::new(phys_addr.as_u64() + self.kernel_mapper.phys_offset.as_u64())
-    }
-    pub fn unmap_page(&mut self, page: Page<Size4KiB>) -> Result<(), UnmapError> {
-        self.user_context.local_map.remove(&page);
-        self.kernel_mapper.mapper.unmap(page)?.1.ignore();
-        Ok(())
-    }
-}
 
-impl MemoryMapper for UserMemoryMapper {
-    fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
-        // TODO track frame allocations so the memory can be reclaimed when the user process quits
-        self.kernel_mapper.allocate_frame()
-    }
-    unsafe fn map_page(
+    pub unsafe fn map_page(
         &mut self,
         page: Page<Size4KiB>,
         frame: PhysFrame<Size4KiB>,
         mut flags: PageTableFlags,
     ) -> Result<(), MapToError<Size4KiB>> {
         flags |= PageTableFlags::USER_ACCESSIBLE;
-        self.user_context.local_map.insert(page, (frame, flags));
-        self.kernel_mapper.map_page(page, frame, flags)
+        self.kernel_mapper
+            .mapper
+            .map_to(page, frame, flags, &mut self.kernel_mapper.frame_allocator)?
+            .ignore();
+        Ok(())
     }
-    fn translate_page(&self, page: Page<Size4KiB>) -> Result<PhysFrame<Size4KiB>, TranslateError> {
-        self.kernel_mapper.translate_page(page)
+    pub fn unmap_page(&mut self, page: Page<Size4KiB>) -> Result<(), UnmapError> {
+        self.kernel_mapper.mapper.unmap(page)?.1.ignore();
+        Ok(())
+    }
+
+    pub fn make_range_user_accessible(
+        &mut self,
+        range: VirtMemRange,
+    ) -> Result<(), FlagUpdateError> {
+        let range_start = Page::from_start_address(range.start()).unwrap();
+        let range_end = Page::containing_address(range.last_addr());
+        for page in Page::<Size4KiB>::range_inclusive(range_start, range_end) {
+            // Translate the page.
+            let res = self.kernel_mapper.mapper.translate(page.start_address());
+            let (frame, flags) = match res {
+                TranslateResult::Mapped {
+                    frame: MappedFrame::Size4KiB(frame),
+                    offset: _,
+                    flags,
+                } => (frame, flags),
+                _ => {
+                    return Err(FlagUpdateError::PageNotMapped);
+                }
+            };
+            // Remap the page with USER_ACCESSIBLE enabled. This also enables it for parent pages.
+            self.unmap_page(page).unwrap();
+            unsafe {
+                self.map_page(page, frame, flags).unwrap();
+            }
+        }
+        Ok(())
     }
 }
 
-static MEMORY_MAPPER: UniqueOnce<UniqueLock<KernelMemoryMapper>> = UniqueOnce::new();
+static mut KERNEL_MEMORY_MAPPER: Option<KernelMemoryMapper> = None;
+static mut USER_MEMORY_MAPPER: Option<UserMemoryMapper> = None;
 
 pub fn init_memory(phys_offset: u64, memory_regions: &'static MemoryRegions) {
-    // Get physical memory offset.
-    let phys_offset = VirtAddr::new(phys_offset);
-    // log::debug!("Physical memory  addr:{:#X}", phys_offset);
-
     // Create kernel mapper and map kernel heap and interrupt stack.
-    MEMORY_MAPPER
-        .call_once(|| {
-            let kernel_mapper = KernelMemoryMapper::init(phys_offset, memory_regions).unwrap();
-            UniqueLock::new("memory mapper", kernel_mapper)
-        })
-        .expect("init_memory called twice");
+    let phys_offset = VirtAddr::new(phys_offset);
+    let kernel_mapper = KernelMemoryMapper::init(phys_offset, memory_regions, KERNEL_MEMORY)
+        .expect("failed to map kernel memory");
+    unsafe {
+        KERNEL_MEMORY_MAPPER = Some(kernel_mapper);
+    }
 
     // Setup the allocator to use the newly-mapped heap.
     unsafe {
         ALLOCATOR.lock().init(
-            KERNEL_HEAP_MEMORY.start().as_mut_ptr(),
-            KERNEL_HEAP_MEMORY.size(),
+            KERNEL_MEMORY.heap.start().as_mut_ptr(),
+            KERNEL_MEMORY.heap.size(),
         );
     }
 
-    // Allocation (Box::new, etc.) is working at this point. Print some numbers.
-    // log::debug!(
-    //     "Execution memory addr:{:#X}",
-    //     VirtAddr::new(EXECUTION_MEMORY_START)
-    // );
-    // log::debug!(
-    //     "  kernel stack size:{}KiB\n  kernel heap  size:{}KiB",
-    //     KERNEL_STACK_MEMORY.size_kib(),
-    //     KERNEL_HEAP_MEMORY.size_kib()
-    // );
-    // log::debug!(
-    //     "  user stack size:{}KiB\n  user heap  size:{}KiB",
-    //     USER_STACK_MEMORY.size_kib(),
-    //     USER_HEAP_MEMORY.size_kib()
-    // );
+    // Map user stack and heap, and create a separate allocator for the user heap.
+    let user_mapper = UserMemoryMapper::init(USER_MEMORY).expect("failed to map user memory");
+    unsafe {
+        USER_MEMORY_MAPPER = Some(user_mapper);
+    }
+}
+
+pub fn user_memory_mapper() -> &'static mut UserMemoryMapper {
+    unsafe { USER_MEMORY_MAPPER.as_mut().expect("no user memory mapper") }
+}
+pub fn user_allocator() -> &'static LockedHeap {
+    &user_memory_mapper().allocator
 }
