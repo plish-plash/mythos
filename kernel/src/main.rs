@@ -15,7 +15,7 @@ mod userspace;
 use alloc::{format, string::String};
 use bootloader_api::{config::Mapping, entry_point, BootInfo, BootloaderConfig};
 
-static OS_NAME: &str = "MariOS";
+static OS_NAME: &str = "Mythos";
 static OS_VERSION: &str = env!("CARGO_PKG_VERSION");
 static mut BOOTLOADER_VERSION: Option<String> = None;
 
