@@ -1,4 +1,7 @@
+# Mythos Toolchain
 This folder contains files to build a custom Rust compiler and std for the operating system. This involves downloading the Rust source code and applying some patches, and generally takes much longer than building the actual operating system.
+
+Also see https://wiki.osdev.org/Porting_Rust_standard_library.
 
 ## Clone the Rust source code
 Do NOT do this inside this project, it's a Rust workspace which will mess with the build.
