@@ -1,0 +1,51 @@
+diff --git a/library/std/Cargo.toml b/library/std/Cargo.toml
+index 96c75f97..999c92c4 100644
+--- a/library/std/Cargo.toml
++++ b/library/std/Cargo.toml
+@@ -16,7 +16,7 @@ panic_unwind = { path = "../panic_unwind", optional = true }
+ panic_abort = { path = "../panic_abort" }
+ core = { path = "../core" }
+ libc = { version = "0.2.140", default-features = false, features = ['rustc-dep-of-std'] }
+-compiler_builtins = { version = "0.1.91" }
++compiler_builtins = { version = "0.1.91", features = ['mem'] }
+ profiler_builtins = { path = "../profiler_builtins", optional = true }
+ unwind = { path = "../unwind" }
+ hashbrown = { version = "0.12", default-features = false, features = ['rustc-dep-of-std'] }
+diff --git a/library/std/build.rs b/library/std/build.rs
+index cf708db6..5570e30a 100644
+--- a/library/std/build.rs
++++ b/library/std/build.rs
+@@ -35,6 +35,7 @@ fn main() {
+         || target.contains("solid")
+         || target.contains("nintendo-3ds")
+         || target.contains("nto")
++        || target.contains("mythos")
+     {
+         // These platforms don't have any special requirements.
+     } else {
+diff --git a/library/std/src/sys/mod.rs b/library/std/src/sys/mod.rs
+index e767b286..f133564c 100644
+--- a/library/std/src/sys/mod.rs
++++ b/library/std/src/sys/mod.rs
+@@ -31,6 +31,9 @@
+     } else if #[cfg(windows)] {
+         mod windows;
+         pub use self::windows::*;
++    } else if #[cfg(target_os = "mythos")] {
++        mod mythos;
++        pub use self::mythos::*;
+     } else if #[cfg(target_os = "solid_asp3")] {
+         mod solid;
+         pub use self::solid::*;
+diff --git a/library/std/src/sys_common/mod.rs b/library/std/src/sys_common/mod.rs
+index e9c727cb..fbad45bc 100644
+--- a/library/std/src/sys_common/mod.rs
++++ b/library/std/src/sys_common/mod.rs
+@@ -44,6 +44,7 @@
+ 
+ cfg_if::cfg_if! {
+     if #[cfg(any(target_os = "l4re",
++                 target_os = "mythos",
+                  feature = "restricted-std",
+                  all(target_family = "wasm", not(target_os = "emscripten")),
+                  all(target_vendor = "fortanix", target_env = "sgx")))] {

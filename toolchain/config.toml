@@ -1,0 +1,10 @@
+profile = "user"
+changelog-seen = 2
+ 
+[build]
+host = ["x86_64-unknown-linux-gnu"]
+target = ["x86_64-unknown-linux-gnu", "x86_64-unknown-mythos"]
+ 
+[rust]
+lld = true
+incremental = true
